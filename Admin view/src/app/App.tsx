@@ -156,6 +156,20 @@ const DEFAULT_ANNOUNCEMENTS: AnnouncementItem[] = [
   },
 ];
 
+function formatEventDateDisplay(dateStr?: string | null): string {
+  if (!dateStr) return "No date set";
+  const dateOnlyMatch = String(dateStr).match(/^(\d{4}-\d{2}-\d{2})/);
+  const parsed = new Date(dateOnlyMatch ? `${dateOnlyMatch[1]}T00:00:00` : dateStr);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateOnlyMatch ? dateOnlyMatch[1] : String(dateStr);
+  }
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function getPublicSurveyTokenFromLocation(): string | null {
   if (typeof window === "undefined") return null;
   const pathMatch = window.location.pathname.match(/^\/survey\/([^/]+)\/?$/i);
@@ -416,20 +430,20 @@ function getTierBadgeMeta(tier: "P1" | "P2" | "P3"): {
     return {
       tier: "P1",
       label: "P1 HIGH",
-      style: "bg-[#FBEDEC] text-[#B3261E] border border-[#E2B3AF] rounded",
+      style: "bg-[#FBEDEC] text-[#B3261E] border border-[#E2B3AF] rounded-none",
     };
   }
   if (tier === "P2") {
     return {
       tier: "P2",
       label: "P2 MED",
-      style: "bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] rounded",
+      style: "bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] rounded-none",
     };
   }
   return {
     tier: "P3",
     label: "P3 STD",
-    style: "bg-[#F2F4F7] text-[#5B6678] border border-[#DDE2EA] rounded",
+    style: "bg-[#F2F4F7] text-[#5B6678] border border-[#DDE2EA] rounded-none",
   };
 }
 
@@ -1971,7 +1985,7 @@ export function CoordinatorInterface({
           {/* Institutional Brand Header + Collapse Toggle */}
           <div className="p-4 border-b border-white/10 bg-[#162452] flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="size-9 rounded-md bg-[#24408E] border border-[#F2B84B]/50 flex items-center justify-center font-black text-[#F2B84B] text-lg shrink-0">
+              <div className="size-9 rounded-none bg-[#24408E] border border-[#F2B84B]/50 flex items-center justify-center font-black text-[#F2B84B] text-lg shrink-0">
                 C
               </div>
               {!isSidebarCollapsed && (
@@ -1988,7 +2002,7 @@ export function CoordinatorInterface({
               type="button"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-              className="p-1.5 rounded text-[#B8C3E3] hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
+              className="p-1.5 rounded-none text-[#B8C3E3] hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
             >
               {isSidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
@@ -2006,7 +2020,7 @@ export function CoordinatorInterface({
                 type="button"
                 title="Home"
                 onClick={() => setActiveNav("home")}
-                className={`w-full px-3 py-2.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center" : "gap-3"
                 } transition-colors cursor-pointer ${
                   activeNav === "home"
@@ -2029,7 +2043,7 @@ export function CoordinatorInterface({
                 type="button"
                 title="Pending Approvals"
                 onClick={() => setActiveNav("approvals")}
-                className={`w-full px-3 py-2.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center relative" : "justify-between"
                 } transition-colors cursor-pointer ${
                   activeNav === "approvals"
@@ -2045,7 +2059,7 @@ export function CoordinatorInterface({
                   <span
                     className={`${
                       isSidebarCollapsed ? "absolute top-1.5 right-2 px-1 text-[9px]" : "px-1.5 py-0.5 text-[10px]"
-                    } rounded-full font-bold bg-[#F2B84B] text-[#1C2D63]`}
+                    } rounded-none font-bold bg-[#F2B84B] text-[#1C2D63]`}
                   >
                     {pendingReviewEvents.length}
                   </span>
@@ -2056,14 +2070,14 @@ export function CoordinatorInterface({
             <div>
               {!isSidebarCollapsed && (
                 <div className="px-3 mb-1.5 text-[10px] font-semibold tracking-wider text-[#B8C3E3] uppercase">
-                  GOVERNANCE &amp; ANALYTICS
+                  GOVERNANCE & ANALYTICS
                 </div>
               )}
               <button
                 type="button"
                 title="Surveys"
                 onClick={() => setActiveNav("surveys")}
-                className={`w-full px-3 py-2.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center" : "gap-3"
                 } transition-colors cursor-pointer ${
                   activeNav === "surveys"
@@ -2079,7 +2093,7 @@ export function CoordinatorInterface({
                 type="button"
                 title="Institutional Mailing List"
                 onClick={() => setActiveNav("mailing")}
-                className={`w-full px-3 py-2.5 mt-0.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 mt-0.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center relative" : "justify-between"
                 } transition-colors cursor-pointer ${
                   activeNav === "mailing"
@@ -2092,7 +2106,7 @@ export function CoordinatorInterface({
                   {!isSidebarCollapsed && <span>Mailing List</span>}
                 </span>
                 {!isSidebarCollapsed && mailingRecipients.filter((r) => r.is_active).length > 0 && (
-                  <span className="px-1.5 py-0.5 text-[10px] rounded-full font-bold bg-white/15 text-[#F2B84B]">
+                  <span className="px-1.5 py-0.5 text-[10px] rounded-none font-bold bg-white/15 text-[#F2B84B]">
                     {mailingRecipients.filter((r) => r.is_active).length}
                   </span>
                 )}
@@ -2102,7 +2116,7 @@ export function CoordinatorInterface({
                 type="button"
                 title="Account Management"
                 onClick={() => setActiveNav("accounts")}
-                className={`w-full px-3 py-2.5 mt-0.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 mt-0.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center" : "gap-3"
                 } transition-colors cursor-pointer ${
                   activeNav === "accounts"
@@ -2129,7 +2143,7 @@ export function CoordinatorInterface({
             <button
               onClick={onLogout}
               title="Exit to Login"
-              className="w-full py-2 px-3 rounded-md bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-white/20"
+              className="w-full py-2 px-3 rounded-none bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-white/20"
             >
               <LogOut className="size-3.5 shrink-0" />
               {!isSidebarCollapsed && <span>Exit to Login</span>}
@@ -2155,7 +2169,7 @@ export function CoordinatorInterface({
               fetchAnnouncements();
               void fetchSyndicationData();
             }}
-            className="px-3 py-1.5 rounded-md bg-white hover:bg-[#F2F4F7] text-[#18212F] border border-[#C9D0DB] font-medium flex items-center gap-1.5 cursor-pointer transition"
+            className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] text-[#18212F] border border-[#C9D0DB] font-medium flex items-center gap-1.5 cursor-pointer transition"
           >
             <RefreshCw className={`size-3.5 text-[#24408E] ${loading ? "animate-spin" : ""}`} />
             Sync Queue
@@ -2181,30 +2195,30 @@ export function CoordinatorInterface({
         {/* ── TAB 1: HOME ── */}
         {activeNav === "home" && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
-            <div className="rounded-md bg-[#EAEFFA] border border-[#C5D3F3] px-4 py-3 text-xs text-[#24408E] flex items-center justify-between">
+            <div className="rounded-none bg-[#EAEFFA] border border-[#C5D3F3] px-4 py-3 text-xs text-[#24408E] flex items-center justify-between">
               <span>
                 Welcome, <b>Admin Coordinator</b>. CampusSync governance services are active for AY 2026–2027.
               </span>
-              <span className="font-mono text-[10px] font-semibold uppercase">RA 8792 &amp; RA 10173 Active</span>
+              <span className="font-mono text-[10px] font-semibold uppercase">RA 8792 & RA 10173 Active</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-5 rounded-lg bg-white border border-[#DDE2EA] shadow-xs text-left">
+              <div className="p-5 rounded-none bg-white border border-[#DDE2EA] shadow-xs text-left">
                 <p className="text-[11px] font-mono text-[#5B6678] uppercase">Pending Review</p>
                 <p className="text-3xl font-black text-[#24408E] mt-1">{pendingReviewEvents.length}</p>
                 <p className="text-[11px] text-[#5B6678] mt-1">Awaiting clearance action</p>
               </div>
-              <div className="p-5 rounded-lg bg-white border border-[#E2B3AF] shadow-xs text-left">
+              <div className="p-5 rounded-none bg-white border border-[#E2B3AF] shadow-xs text-left">
                 <p className="text-[11px] font-mono text-[#5B6678] uppercase">P1 High Urgency</p>
                 <p className="text-3xl font-black text-[#B3261E] mt-1">{p1UrgentCount}</p>
                 <p className="text-[11px] text-[#B3261E]/80 mt-1">Within 96 hours lead time</p>
               </div>
-              <div className="p-5 rounded-lg bg-white border border-[#B6DFC8] shadow-xs text-left">
+              <div className="p-5 rounded-none bg-white border border-[#B6DFC8] shadow-xs text-left">
                 <p className="text-[11px] font-mono text-[#5B6678] uppercase">Approved Events</p>
                 <p className="text-3xl font-black text-[#1F7A4D] mt-1">{approvedEvents.length}</p>
-                <p className="text-[11px] text-[#1F7A4D]/80 mt-1">SHA-256 sealed &amp; live</p>
+                <p className="text-[11px] text-[#1F7A4D]/80 mt-1">SHA-256 sealed & live</p>
               </div>
-              <div className="p-5 rounded-lg bg-white border border-[#DDE2EA] shadow-xs text-left">
+              <div className="p-5 rounded-none bg-white border border-[#DDE2EA] shadow-xs text-left">
                 <p className="text-[11px] font-mono text-[#5B6678] uppercase">Active Facilitators</p>
                 <p className="text-3xl font-black text-[#18212F] mt-1">{facilitatorAccounts.length}</p>
                 <p className="text-[11px] text-[#5B6678] mt-1">Synced from Facilitator Portal</p>
@@ -2212,7 +2226,7 @@ export function CoordinatorInterface({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-5 rounded-lg bg-white border border-[#DDE2EA] p-6 h-fit shadow-xs">
+              <div className="lg:col-span-5 rounded-none bg-white border border-[#DDE2EA] p-6 h-fit shadow-xs">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] mb-4 flex items-center gap-2">
                   <Megaphone className="size-4" /> Broadcast Facilitator Announcement (UC-05)
                 </h2>
@@ -2226,7 +2240,7 @@ export function CoordinatorInterface({
                       value={annTitle}
                       onChange={(e) => setAnnTitle(e.target.value)}
                       placeholder="e.g., Term 2 Proposal Submission Cutoff"
-                      className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                   <div>
@@ -2239,19 +2253,19 @@ export function CoordinatorInterface({
                       value={annContent}
                       onChange={(e) => setAnnContent(e.target.value)}
                       placeholder="Enter clearance guidelines, cutoffs, or system notices..."
-                      className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
+                      className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
                     />
                   </div>
                   <button
                     type="submit"
-                    className="w-full py-2.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition"
+                    className="w-full py-2.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition"
                   >
                     <Send className="size-3.5" /> Publish Announcement
                   </button>
                 </form>
               </div>
 
-              <div className="lg:col-span-7 rounded-lg bg-white border border-[#DDE2EA] p-6 text-left shadow-xs">
+              <div className="lg:col-span-7 rounded-none bg-white border border-[#DDE2EA] p-6 text-left shadow-xs">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] mb-4">
                   Active Institutional Announcements
                 </h2>
@@ -2259,7 +2273,7 @@ export function CoordinatorInterface({
                   {announcements.map((item) => (
                     <div
                       key={item.id}
-                      className="p-4 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-1.5"
+                      className="p-4 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-sm font-bold text-[#18212F]">{item.title}</h3>
@@ -2294,14 +2308,14 @@ export function CoordinatorInterface({
                       {triagedEvents.length} proposal{triagedEvents.length === 1 ? "" : "s"} sorted by priority
                     </p>
                   </div>
-                  <div className="flex items-center gap-1 bg-[#F2F4F7] p-1 rounded-md border border-[#DDE2EA] text-[10px]">
+                  <div className="flex items-center gap-1 bg-[#F2F4F7] p-1 rounded-none border border-[#DDE2EA] text-[10px]">
                     <button
                       type="button"
                       onClick={() => {
                         setReviewFilter("PENDING");
                         setSelectedEventId(null);
                       }}
-                      className={`px-2 py-1 rounded font-semibold cursor-pointer transition ${
+                      className={`px-2 py-1 rounded-none font-semibold cursor-pointer transition ${
                         reviewFilter === "PENDING"
                           ? "bg-[#24408E] text-white"
                           : "text-[#5B6678] hover:text-[#18212F]"
@@ -2315,7 +2329,7 @@ export function CoordinatorInterface({
                         setReviewFilter("ALL");
                         setSelectedEventId(null);
                       }}
-                      className={`px-2 py-1 rounded font-semibold cursor-pointer transition ${
+                      className={`px-2 py-1 rounded-none font-semibold cursor-pointer transition ${
                         reviewFilter === "ALL"
                           ? "bg-[#24408E] text-white"
                           : "text-[#5B6678] hover:text-[#18212F]"
@@ -2331,7 +2345,7 @@ export function CoordinatorInterface({
                   type="button"
                   onClick={handleRunBatchTriage}
                   disabled={triageLoading || baseEventsList.length === 0}
-                  className="w-full py-2 px-3 rounded-md bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#24408E]/30 text-[#24408E] text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  className="w-full py-2 px-3 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#24408E]/30 text-[#24408E] text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
                 >
                   {triageLoading ? (
                     <>
@@ -2347,20 +2361,20 @@ export function CoordinatorInterface({
                 </button>
 
                 {triageError && (
-                  <div className="p-2 rounded bg-[#FBEDEC] border border-[#E2B3AF] text-[11px] text-[#B3261E] flex items-start gap-1.5">
+                  <div className="p-2 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-[11px] text-[#B3261E] flex items-start gap-1.5">
                     <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-[#B3261E]" />
                     <span>{triageError}</span>
                   </div>
                 )}
 
                 {/* Urgency Filter Tabs */}
-                <div className="grid grid-cols-4 gap-1 p-1 bg-[#F2F4F7] rounded-md border border-[#DDE2EA] text-[11px]">
+                <div className="grid grid-cols-4 gap-1 p-1 bg-[#F2F4F7] rounded-none border border-[#DDE2EA] text-[11px]">
                   {(["ALL", "P1", "P2", "P3"] as const).map((tier) => (
                     <button
                       key={tier}
                       type="button"
                       onClick={() => setTriageTier(tier)}
-                      className={`py-1 rounded font-semibold transition text-center cursor-pointer ${
+                      className={`py-1 rounded-none font-semibold transition text-center cursor-pointer ${
                         triageTier === tier
                           ? "bg-[#24408E] text-white shadow-xs"
                           : "text-[#5B6678] hover:text-[#18212F] hover:bg-white/70"
@@ -2399,7 +2413,7 @@ export function CoordinatorInterface({
                     <div
                       key={item.event_id}
                       onClick={() => setSelectedEventId(item.event_id)}
-                      className={`p-4 rounded-md border transition-all cursor-pointer text-left ${
+                      className={`p-4 rounded-none border transition-all cursor-pointer text-left ${
                         isSelected
                           ? "bg-[#EAEFFA] border-[#24408E] shadow-[inset_3px_0_0_#24408E]"
                           : "bg-white border-[#DDE2EA] hover:border-[#24408E]/40 hover:bg-[#F9FAFC]"
@@ -2419,7 +2433,7 @@ export function CoordinatorInterface({
                             {aiTriage ? `${aiTriage.priorityTier} · C${aiTriage.complexityScore}` : urgency.label}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded capitalize ${getStatusBadgeStyle(
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-none capitalize ${getStatusBadgeStyle(
                               item.status
                             )}`}
                           >
@@ -2436,8 +2450,9 @@ export function CoordinatorInterface({
                       </div>
 
                       <div className="flex items-center gap-3 text-[11px] text-[#5B6678] mb-1">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="size-3 text-[#24408E]" /> {item.event_date || "No date set"}
+                        <span className="flex items-center gap-1 shrink-0">
+                          <Calendar className="size-3 text-[#24408E]" />{" "}
+                          {formatEventDateDisplay(item.event_date)}
                         </span>
                         <span className="flex items-center gap-1 truncate">
                           <Building2 className="size-3 text-[#24408E]" /> {item.venue || "No venue"}
@@ -2468,14 +2483,14 @@ export function CoordinatorInterface({
                           </button>
 
                           {isRationaleOpen && (
-                            <div className="p-2.5 rounded bg-white border border-[#DDE2EA] text-[11px] space-y-1.5">
+                            <div className="p-2.5 rounded-none bg-white border border-[#DDE2EA] text-[11px] space-y-1.5">
                               <p className="text-[#18212F] leading-relaxed">{aiTriage.rationale}</p>
                               {aiTriage.riskFlags.length > 0 && (
                                 <div className="flex flex-wrap gap-1 pt-0.5">
                                   {aiTriage.riskFlags.map((flag, i) => (
                                     <span
                                       key={i}
-                                      className="px-1.5 py-0.5 rounded bg-[#FBEDEC] border border-[#E2B3AF] text-[#B3261E] text-[9px] font-medium"
+                                      className="px-1.5 py-0.5 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-[#B3261E] text-[9px] font-medium"
                                     >
                                       ⚑ {flag}
                                     </span>
@@ -2492,7 +2507,7 @@ export function CoordinatorInterface({
                           {(item.tags || []).slice(0, 3).map((tag) => (
                             <span
                               key={tag}
-                              className="px-2 py-0.5 rounded bg-[#F2F4F7] text-[10px] text-[#5B6678] border border-[#DDE2EA]"
+                              className="px-2 py-0.5 rounded-none bg-[#F2F4F7] text-[10px] text-[#5B6678] border border-[#DDE2EA]"
                             >
                               {tag}
                             </span>
@@ -2515,7 +2530,7 @@ export function CoordinatorInterface({
                         {selectedEvent.title}
                       </h2>
                       <span
-                        className={`px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider ${getStatusBadgeStyle(
+                        className={`px-2.5 py-0.5 rounded-none text-xs font-semibold uppercase tracking-wider ${getStatusBadgeStyle(
                           selectedEvent.status
                         )}`}
                       >
@@ -2542,7 +2557,7 @@ export function CoordinatorInterface({
                     type="button"
                     onClick={() => handleRunSingleTriage(selectedEvent)}
                     disabled={triageLoading}
-                    className="px-3 py-1.5 rounded-md bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#24408E] flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#24408E] flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-40"
                   >
                     {triageLoading ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -2556,7 +2571,7 @@ export function CoordinatorInterface({
                 <div className="p-6 md:p-7 space-y-6 flex-1">
                   {/* AI Triage Rationale & Risk Flags Banner */}
                   {selectedTriage && (
-                    <div className="p-4 rounded-lg bg-white border border-[#C5D3F3] shadow-xs space-y-2">
+                    <div className="p-4 rounded-none bg-white border border-[#C5D3F3] shadow-xs space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-[#24408E] uppercase tracking-wider flex items-center gap-1.5">
                           <Brain className="size-3.5" /> Dynamic AI Priority Triage ({selectedTriage.priorityTier})
@@ -2571,7 +2586,7 @@ export function CoordinatorInterface({
                           {selectedTriage.riskFlags.map((flag, idx) => (
                             <span
                               key={idx}
-                              className="px-2 py-0.5 rounded bg-[#FBEDEC] border border-[#E2B3AF] text-[#B3261E] text-[10px] font-medium"
+                              className="px-2 py-0.5 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-[#B3261E] text-[10px] font-medium"
                             >
                               ⚑ {flag}
                             </span>
@@ -2586,27 +2601,33 @@ export function CoordinatorInterface({
                       Event Logistics
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+                      <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs min-w-0">
                         <p className="text-xs text-[#5B6678] mb-1 flex items-center gap-1.5">
-                          <Calendar className="size-3.5 text-[#24408E]" /> Date
+                          <Calendar className="size-3.5 text-[#24408E] shrink-0" /> Date
                         </p>
-                        <p className="text-sm font-semibold text-[#18212F]">
-                          {selectedEvent.event_date || "No date set"}
+                        <p
+                          title={selectedEvent.event_date || "No date set"}
+                          className="text-sm font-semibold text-[#18212F] whitespace-nowrap overflow-hidden text-ellipsis"
+                        >
+                          {formatEventDateDisplay(selectedEvent.event_date)}
                         </p>
                       </div>
-                      <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+                      <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs min-w-0">
                         <p className="text-xs text-[#5B6678] mb-1 flex items-center gap-1.5">
-                          <Clock className="size-3.5 text-[#24408E]" /> Schedule
+                          <Clock className="size-3.5 text-[#24408E] shrink-0" /> Schedule
                         </p>
-                        <p className="text-sm font-semibold text-[#18212F]">
+                        <p className="text-sm font-semibold text-[#18212F] whitespace-nowrap">
                           {selectedEvent.start_time || "--"} – {selectedEvent.end_time || "--"}
                         </p>
                       </div>
-                      <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+                      <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs min-w-0">
                         <p className="text-xs text-[#5B6678] mb-1 flex items-center gap-1.5">
-                          <Building2 className="size-3.5 text-[#24408E]" /> Venue
+                          <Building2 className="size-3.5 text-[#24408E] shrink-0" /> Venue
                         </p>
-                        <p className="text-sm font-semibold text-[#18212F] truncate">
+                        <p
+                          title={selectedEvent.venue || "No venue"}
+                          className="text-sm font-semibold text-[#18212F] truncate"
+                        >
                           {selectedEvent.venue || "No venue"}
                         </p>
                       </div>
@@ -2614,24 +2635,24 @@ export function CoordinatorInterface({
                   </div>
 
                   {/* 100% Automated Jira-Style AI Executive Summary & Document Verification */}
-                  <div className="rounded-lg bg-white border border-[#C5D3F3] shadow-xs p-5 space-y-4">
+                  <div className="rounded-none bg-white border border-[#C5D3F3] shadow-xs p-5 space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
                       <div className="flex items-center gap-2">
                         <Sparkles className="size-4 text-[#24408E]" />
                         <h3 className="text-xs font-bold text-[#18212F] uppercase tracking-wider">
-                          AI Executive Summary &amp; Document Verification
+                          AI Executive Summary & Document Verification
                         </h3>
                       </div>
 
                       <div>
                         {preScreenLoading || selectedIsProcessing ? (
-                          <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3]">
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-0.5 rounded-none bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3]">
                             <Loader2 className="size-3 animate-spin" />
                             Auto-Checking...
                           </span>
                         ) : selectedPreScreen ? (
                           <span
-                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full border ${
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-none border ${
                               selectedAuditStatus === "COMPLETE"
                                 ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
                                 : "bg-[#FBEDEC] text-[#B3261E] border-[#E2B3AF]"
@@ -2649,7 +2670,7 @@ export function CoordinatorInterface({
                     {(selectedCarriedFiles.length > 0 ||
                       selectedRemoteDocs.length > 0 ||
                       selectedEvent.document_path) && (
-                      <div className="p-3 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-2 text-xs">
+                      <div className="p-3 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-2 text-xs">
                         <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[#24408E]">
                           Submitted Documents
                         </div>
@@ -2657,7 +2678,7 @@ export function CoordinatorInterface({
                         {selectedCarriedFiles.map((att, idx) => (
                           <div
                             key={`carried-${idx}-${att.name}`}
-                            className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded bg-white border border-[#C5D3F3]"
+                            className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-none bg-white border border-[#C5D3F3]"
                           >
                             <span className="flex items-center gap-2 text-[#18212F] truncate min-w-0">
                               <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
@@ -2677,7 +2698,7 @@ export function CoordinatorInterface({
                                   const url = carriedAttachmentToBlobUrl(att);
                                   if (url) window.open(url, "_blank", "noopener,noreferrer");
                                 }}
-                                className="px-2 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[10px] font-semibold text-[#24408E] flex items-center gap-1 shrink-0 cursor-pointer"
+                                className="px-2 py-1 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[10px] font-semibold text-[#24408E] flex items-center gap-1 shrink-0 cursor-pointer"
                               >
                                 View PDF <ExternalLink className="size-3" />
                               </button>
@@ -2689,7 +2710,7 @@ export function CoordinatorInterface({
                           selectedRemoteDocs.map((doc) => (
                             <div
                               key={`${doc.index}-${doc.filename}`}
-                              className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded bg-white border border-[#C5D3F3]"
+                              className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-none bg-white border border-[#C5D3F3]"
                             >
                               <span className="flex items-center gap-2 text-[#18212F] truncate min-w-0">
                                 <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
@@ -2702,7 +2723,7 @@ export function CoordinatorInterface({
                                 href={doc.downloadUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="px-2 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[10px] font-semibold text-[#24408E] flex items-center gap-1 shrink-0"
+                                className="px-2 py-1 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[10px] font-semibold text-[#24408E] flex items-center gap-1 shrink-0"
                               >
                                 View PDF <ExternalLink className="size-3" />
                               </a>
@@ -2712,7 +2733,7 @@ export function CoordinatorInterface({
                         {selectedEvent.document_path &&
                           selectedCarriedFiles.length === 0 &&
                           selectedRemoteDocs.length === 0 && (
-                            <div className="flex items-center justify-between gap-2 p-2.5 rounded bg-white border border-[#DDE2EA]">
+                            <div className="flex items-center justify-between gap-2 p-2.5 rounded-none bg-white border border-[#DDE2EA]">
                               <span className="flex items-center gap-2 text-[#18212F] truncate">
                                 <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
                                 <span className="truncate font-mono text-[11px]">
@@ -2729,14 +2750,14 @@ export function CoordinatorInterface({
 
                     {/* Clean Status Error Banner if Automated Audit Encounters an Issue */}
                     {preScreenError && !preScreenLoading && !selectedPreScreen && (
-                      <div className="p-3.5 rounded-md bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
+                      <div className="p-3.5 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
                         <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#B3261E]" />
                         <span>{preScreenError}</span>
                       </div>
                     )}
 
                     {preScreenLoading || selectedIsProcessing ? (
-                      <div className="p-6 rounded-md bg-[#F7F9FF] border border-[#C5D3F3] flex flex-col items-center justify-center text-center gap-2">
+                      <div className="p-6 rounded-none bg-[#F7F9FF] border border-[#C5D3F3] flex flex-col items-center justify-center text-center gap-2">
                         <Loader2 className="size-5 animate-spin text-[#24408E]" />
                         <p className="text-xs font-semibold text-[#18212F]">
                           AI Multimodal Engine is reviewing attached files and verifying signatures...
@@ -2748,13 +2769,13 @@ export function CoordinatorInterface({
                     ) : selectedPreScreen ? (
                       <div className="space-y-4 text-xs">
                         {/* 1. Jira-Style AI Executive Event Summary */}
-                        <div className="p-4 rounded-md bg-[#F7F9FF] border border-[#C5D3F3] space-y-2.5">
+                        <div className="p-4 rounded-none bg-[#F7F9FF] border border-[#C5D3F3] space-y-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[11px] font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-1.5">
                               <Sparkles className="size-3.5" /> AI Event Summary
                             </span>
                             <span className="text-[10px] text-[#5B6678]">
-                              Synthesized from proposal &amp; attached files
+                              Synthesized from proposal & attached files
                             </span>
                           </div>
                           <h4 className="text-sm font-bold text-[#18212F]">
@@ -2778,13 +2799,13 @@ export function CoordinatorInterface({
 
                         {/* 2. Readiness Verdict Banner (COMPLETE vs DEFECTIVE) */}
                         {selectedAuditStatus === "COMPLETE" ? (
-                          <div className="p-4 rounded-md bg-[#E6F3EC] border border-[#B6DFC8] space-y-1.5">
+                          <div className="p-4 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] space-y-1.5">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2 text-[#1F7A4D] font-bold text-xs">
                                 <CheckCircle2 className="size-4 shrink-0" />
-                                Complete &amp; Verified — Ready for Approval
+                                Complete & Verified — Ready for Approval
                               </div>
-                              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-white text-[#1F7A4D] border border-[#B6DFC8]">
+                              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-none bg-white text-[#1F7A4D] border border-[#B6DFC8]">
                                 Score: {selectedPreScreen.completenessScore}/100
                               </span>
                             </div>
@@ -2794,13 +2815,13 @@ export function CoordinatorInterface({
                             </p>
                           </div>
                         ) : (
-                          <div className="p-4 rounded-md bg-[#FBEDEC] border border-[#E2B3AF] space-y-3">
+                          <div className="p-4 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] space-y-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2 text-[#B3261E] font-bold text-xs">
                                 <AlertTriangle className="size-4 shrink-0" />
                                 Defective Submission — Missing Items or Inconsistencies Found
                               </div>
-                              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-white text-[#B3261E] border border-[#E2B3AF]">
+                              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-none bg-white text-[#B3261E] border border-[#E2B3AF]">
                                 Score: {selectedPreScreen.completenessScore}/100
                               </span>
                             </div>
@@ -2810,14 +2831,14 @@ export function CoordinatorInterface({
                             </p>
 
                             {selectedDefects.length > 0 && (
-                              <div className="rounded-md bg-white border border-[#E2B3AF] divide-y divide-[#F3D5D2]">
+                              <div className="rounded-none bg-white border border-[#E2B3AF] divide-y divide-[#F3D5D2]">
                                 {selectedDefects.map((defect, idx) => (
                                   <div
                                     key={idx}
                                     className="px-3 py-2 flex items-start gap-2 text-[11px]"
                                   >
                                     <span
-                                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      className={`shrink-0 px-1.5 py-0.5 rounded-none text-[10px] font-bold ${
                                         defect.category === "Inconsistency"
                                           ? "bg-[#FFF4DC] text-[#8A5A00]"
                                           : "bg-[#FBEDEC] text-[#B3261E]"
@@ -2840,10 +2861,10 @@ export function CoordinatorInterface({
                                   onClick={() =>
                                     handleOpenRevisionWithAiDefects(selectedPreScreen)
                                   }
-                                  className="px-3 py-1.5 rounded-md bg-[#8A5A00] hover:bg-[#704800] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                                  className="px-3 py-1.5 rounded-none bg-[#8A5A00] hover:bg-[#704800] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition"
                                 >
                                   <AlertTriangle className="size-3.5" />
-                                  Pre-fill Revision Notes &amp; Request Revisions
+                                  Pre-fill Revision Notes & Request Revisions
                                 </button>
                               </div>
                             )}
@@ -2851,7 +2872,7 @@ export function CoordinatorInterface({
                         )}
 
                         {/* 3. Visual Signature Verification */}
-                        <div className="p-3.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-2">
+                        <div className="p-3.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] font-bold text-[#18212F] flex items-center gap-1.5">
                               <PenTool className="size-3.5 text-[#24408E]" /> Visual Signature Verification
@@ -2877,7 +2898,7 @@ export function CoordinatorInterface({
                               {selectedPreScreen.signatureCheck.detectedSignatories.map((sig, i) => (
                                 <span
                                   key={i}
-                                  className="px-2 py-0.5 rounded bg-[#E6F3EC] border border-[#B6DFC8] text-[#1F7A4D] text-[10px] font-medium"
+                                  className="px-2 py-0.5 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-[#1F7A4D] text-[10px] font-medium"
                                 >
                                   ✓ {sig}
                                 </span>
@@ -2899,7 +2920,7 @@ export function CoordinatorInterface({
                             {selectedPreScreen.checklistEvaluation.map((item, idx) => (
                               <div
                                 key={idx}
-                                className="p-3 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] flex flex-col gap-1"
+                                className="p-3 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] flex flex-col gap-1"
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-[11px] font-semibold text-[#18212F]">
@@ -2922,7 +2943,7 @@ export function CoordinatorInterface({
                         )}
                       </div>
                     ) : !preScreenError ? (
-                      <div className="p-4 rounded-md bg-[#FFF4DC] border border-[#E5C98B] text-xs text-[#8A5A00] flex items-start gap-2.5">
+                      <div className="p-4 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-xs text-[#8A5A00] flex items-start gap-2.5">
                         <AlertTriangle className="size-4 shrink-0 mt-0.5 text-[#8A5A00]" />
                         <div className="space-y-0.5">
                           <p className="font-semibold text-[#6B4600]">
@@ -2940,7 +2961,7 @@ export function CoordinatorInterface({
                     <h3 className="text-xs font-bold text-[#5B6678] uppercase tracking-wider mb-2">
                       Proposal Description
                     </h3>
-                    <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs text-sm leading-relaxed text-[#18212F]">
+                    <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs text-sm leading-relaxed text-[#18212F]">
                       {decodedSelected.cleanDescription || "No description provided."}
                     </div>
                   </div>
@@ -2949,7 +2970,7 @@ export function CoordinatorInterface({
                     <h3 className="text-xs font-bold text-[#5B6678] uppercase tracking-wider mb-3">
                       Promotional Assets
                     </h3>
-                    <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs flex items-center justify-between gap-3">
+                    <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs text-[#5B6678] mb-0.5">Registration Link</p>
                         <p className="text-sm font-medium text-[#18212F] truncate max-w-md">
@@ -2963,7 +2984,7 @@ export function CoordinatorInterface({
                           href={selectedEvent.external_registration_link || selectedEvent.registration_link}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-3 py-1.5 rounded-md bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] font-semibold text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                          className="px-3 py-1.5 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] font-semibold text-xs flex items-center gap-1.5 transition-colors shrink-0"
                         >
                           Open <ExternalLink className="size-3.5" />
                         </a>
@@ -2972,7 +2993,7 @@ export function CoordinatorInterface({
                   </div>
 
                   {selectedEvent.admin_feedback && normalizedStatus(selectedEvent.status) !== "pending" && (
-                    <div className="p-4 rounded-lg bg-[#FFF4DC] border border-[#E5C98B] text-xs space-y-1">
+                    <div className="p-4 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-xs space-y-1">
                       <div className="font-bold text-[#8A5A00] uppercase tracking-wider text-[10px]">
                         Coordinator Feedback Sent
                       </div>
@@ -2987,16 +3008,16 @@ export function CoordinatorInterface({
                 {(normalizedStatus(selectedEvent.status) === "approved" ||
                   normalizedStatus(selectedEvent.status) === "completed") && (
                   <div className="mx-6 mb-4 space-y-3">
-                    <div className="p-4 rounded-lg bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-2">
+                    <div className="p-4 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[#1F7A4D] font-bold text-[11px] flex items-center gap-1.5">
                           <ShieldCheck className="size-3.5" /> Tamper-Evident Institutional Clearance Ledger
                         </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
+                        <span className="text-[10px] px-2 py-0.5 rounded-none bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
                           RA 8792 Compliant
                         </span>
                       </div>
-                      <div className="font-mono text-[10px] text-[#18212F] break-all bg-white/80 p-2.5 rounded border border-[#B6DFC8]">
+                      <div className="font-mono text-[10px] text-[#18212F] break-all bg-white/80 p-2.5 rounded-none border border-[#B6DFC8]">
                         SHA-256: {selectedEvent.clearance_hash || "Computed automatically on institutional dispatch"}
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-[#5B6678] pt-0.5">
@@ -3056,7 +3077,7 @@ export function CoordinatorInterface({
                       <button
                         onClick={() => handleUpdateStatus("rejected")}
                         disabled={actionLoading}
-                        className={`px-4 py-2 rounded-md text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer ${
+                        className={`px-4 py-2 rounded-none text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer ${
                           selectedAuditStatus === "DEFECTIVE"
                             ? "bg-[#B3261E] hover:bg-[#8C1D18] text-white shadow-xs"
                             : "border border-[#E2B3AF] bg-white text-[#B3261E] hover:bg-[#FBEDEC]"
@@ -3072,7 +3093,7 @@ export function CoordinatorInterface({
                           setShowRevisionModal(true);
                         }}
                         disabled={actionLoading}
-                        className={`px-4 py-2 rounded-md text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer ${
+                        className={`px-4 py-2 rounded-none text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer ${
                           selectedAuditStatus === "DEFECTIVE"
                             ? "bg-[#D97706] hover:bg-[#B45309] text-white shadow-xs"
                             : "border border-[#E5C98B] bg-[#FFF4DC]/60 text-[#8A5A00] hover:bg-[#FFF4DC]"
@@ -3083,7 +3104,7 @@ export function CoordinatorInterface({
                       <button
                         onClick={() => handleUpdateStatus("approved")}
                         disabled={actionLoading}
-                        className={`px-5 py-2 rounded-md text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer ${
+                        className={`px-5 py-2 rounded-none text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer ${
                           selectedAuditStatus === "COMPLETE"
                             ? "bg-[#1F7A4D] hover:bg-[#17603B] text-white shadow-sm"
                             : selectedAuditStatus === "DEFECTIVE"
@@ -3092,7 +3113,7 @@ export function CoordinatorInterface({
                         }`}
                       >
                         <CheckCircle2 className="size-4" />
-                        Approve &amp; Sign (SHA-256)
+                        Approve & Sign (SHA-256)
                       </button>
                     </div>
                   </div>
@@ -3107,7 +3128,7 @@ export function CoordinatorInterface({
                         : "This proposal has already been endorsed and cleared."}
                     </span>
                     <span
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-semibold uppercase ${getStatusBadgeStyle(
+                      className={`px-2.5 py-0.5 rounded-none text-[11px] font-semibold uppercase ${getStatusBadgeStyle(
                         selectedEvent.status
                       )}`}
                     >
@@ -3133,7 +3154,7 @@ export function CoordinatorInterface({
                   <button
                     type="button"
                     onClick={() => setReviewFilter("ALL")}
-                    className="mt-4 px-4 py-2 rounded-md border border-[#C9D0DB] bg-white hover:bg-[#EAEFFA] text-[#24408E] text-xs font-semibold cursor-pointer"
+                    className="mt-4 px-4 py-2 rounded-none border border-[#C9D0DB] bg-white hover:bg-[#EAEFFA] text-[#24408E] text-xs font-semibold cursor-pointer"
                   >
                     View All Proposals ({events.length})
                   </button>
@@ -3148,7 +3169,7 @@ export function CoordinatorInterface({
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 text-left">
             <div className="border-b border-[#DDE2EA] pb-4">
               <h1 className="text-lg font-bold text-[#18212F] flex items-center gap-2">
-                <Sparkles className="size-4 text-[#24408E]" /> Post-Event Evaluation Surveys &amp; AI Diagnostics
+                <Sparkles className="size-4 text-[#24408E]" /> Post-Event Evaluation Surveys & AI Diagnostics
               </h1>
               <p className="text-xs text-[#5B6678] mt-0.5">
                 Generate tailored student questionnaires with Gemini 3.8 Flash and synthesize executive sentiment diagnostics from post-event feedback.
@@ -3156,7 +3177,7 @@ export function CoordinatorInterface({
             </div>
 
             {/* ── SECTION A: AI-ASSISTED POST-EVENT SURVEY GENERATOR ── */}
-            <div className="rounded-lg bg-white border border-[#C5D3F3] p-6 space-y-5 shadow-xs">
+            <div className="rounded-none bg-white border border-[#C5D3F3] p-6 space-y-5 shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
                 <div>
                   <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-2">
@@ -3166,7 +3187,7 @@ export function CoordinatorInterface({
                     Select an event, refine objectives, and generate an editable student evaluation questionnaire.
                   </p>
                 </div>
-                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3]">
+                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-none bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3]">
                   Gemini 3.8 Flash
                 </span>
               </div>
@@ -3194,7 +3215,7 @@ export function CoordinatorInterface({
                         setActiveSurveyDraft(existingDraft);
                       }
                     }}
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   >
                     {events.filter((e) => normalizedStatus(e.status) !== "rejected").length === 0 ? (
                       <option value="">Default Sample Event</option>
@@ -3215,7 +3236,7 @@ export function CoordinatorInterface({
                   <select
                     value={surveyCategory}
                     onChange={(e) => setSurveyCategory(e.target.value)}
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   >
                     <option value="Academic Seminar / Workshop">Academic Seminar / Workshop</option>
                     <option value="Hackathon / Technical Competition">Hackathon / Technical Competition</option>
@@ -3228,19 +3249,19 @@ export function CoordinatorInterface({
 
               <div>
                 <label className="text-xs font-semibold text-[#18212F] block mb-1">
-                  Event Objectives &amp; Focus Areas (Optional — defaults to proposal description)
+                  Event Objectives & Focus Areas (Optional — defaults to proposal description)
                 </label>
                 <textarea
                   rows={2}
                   value={surveyObjectives}
                   onChange={(e) => setSurveyObjectives(e.target.value)}
                   placeholder="e.g., Measure technical skill acquisition, venue & Wi-Fi reliability, mentor effectiveness, and suggestions for next term..."
-                  className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
+                  className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
                 />
               </div>
 
               {/* Institutional Email Syndication Target Audience (auto-dispatched once survey finalizes for approved events) */}
-              <div className="p-3.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="p-3.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div className="space-y-1">
                   <div className="text-[11px] font-bold text-[#18212F] flex items-center gap-1.5">
                     <Mail className="size-3.5 text-[#24408E]" /> Automatic Institutional Email Syndication Audience
@@ -3257,7 +3278,7 @@ export function CoordinatorInterface({
                     return (
                       <label
                         key={role}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-semibold capitalize cursor-pointer transition ${
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-none border text-[11px] font-semibold capitalize cursor-pointer transition ${
                           checked
                             ? "bg-[#EAEFFA] border-[#24408E] text-[#24408E]"
                             : "bg-white border-[#C9D0DB] text-[#5B6678]"
@@ -3273,7 +3294,7 @@ export function CoordinatorInterface({
                               return next.length > 0 ? next : prev;
                             });
                           }}
-                          className="accent-[#24408E]"
+                          className="accent-[#24408E] rounded-none"
                         />
                         {role === "student" ? "Students" : role === "faculty" ? "Faculty" : "Staff"} ({count})
                       </label>
@@ -3294,7 +3315,7 @@ export function CoordinatorInterface({
                   type="button"
                   onClick={handleGenerateSurveyWithAi}
                   disabled={generatingSurvey || syndicatingEventId !== null}
-                  className="px-5 py-2.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
                 >
                   {generatingSurvey ? (
                     <>
@@ -3304,7 +3325,7 @@ export function CoordinatorInterface({
                   ) : (
                     <>
                       <Sparkles className="size-3.5" />
-                      Generate Survey &amp; Auto-Push Email
+                      Generate Survey & Auto-Push Email
                     </>
                   )}
                 </button>
@@ -3312,7 +3333,7 @@ export function CoordinatorInterface({
                 <button
                   type="button"
                   onClick={addDraftQuestion}
-                  className="px-4 py-2.5 rounded-md bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#18212F] flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2.5 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#18212F] flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="size-3.5 text-[#24408E]" /> Add Custom Question
                 </button>
@@ -3343,7 +3364,7 @@ export function CoordinatorInterface({
               })()}
 
               {surveyGenError && (
-                <div className="p-3 rounded-md bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
+                <div className="p-3 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
                   <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#B3261E]" />
                   <span>{surveyGenError}</span>
                 </div>
@@ -3351,7 +3372,7 @@ export function CoordinatorInterface({
 
               {/* Editable AI-Generated Questionnaire */}
               {activeSurveyDraft && (
-                <div className="p-5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-4">
+                <div className="p-5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-mono uppercase text-[#5B6678] block mb-1">
@@ -3362,7 +3383,7 @@ export function CoordinatorInterface({
                         onChange={(e) =>
                           setActiveSurveyDraft({ ...activeSurveyDraft, surveyTitle: e.target.value })
                         }
-                        className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs font-semibold text-[#18212F] focus:border-[#24408E] outline-none"
+                        className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs font-semibold text-[#18212F] focus:border-[#24408E] outline-none"
                       />
                     </div>
                     <div>
@@ -3374,7 +3395,7 @@ export function CoordinatorInterface({
                         onChange={(e) =>
                           setActiveSurveyDraft({ ...activeSurveyDraft, description: e.target.value })
                         }
-                        className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
+                        className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
                       />
                     </div>
                   </div>
@@ -3386,7 +3407,7 @@ export function CoordinatorInterface({
                     {activeSurveyDraft.questions.map((q, idx) => (
                       <div
                         key={q.id}
-                        className="p-3.5 rounded-md bg-white border border-[#DDE2EA] space-y-2.5"
+                        className="p-3.5 rounded-none bg-white border border-[#DDE2EA] space-y-2.5"
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-mono text-[#24408E] font-bold">
@@ -3395,7 +3416,7 @@ export function CoordinatorInterface({
                           <input
                             value={q.text}
                             onChange={(e) => updateDraftQuestion(q.id, { text: e.target.value })}
-                            className="flex-1 min-w-[220px] p-1.5 rounded bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
+                            className="flex-1 min-w-[220px] p-1.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
                           />
                           <select
                             value={q.type}
@@ -3411,7 +3432,7 @@ export function CoordinatorInterface({
                                     : [],
                               });
                             }}
-                            className="p-1.5 rounded bg-white border border-[#C9D0DB] text-[11px] text-[#18212F] outline-none"
+                            className="p-1.5 rounded-none bg-white border border-[#C9D0DB] text-[11px] text-[#18212F] outline-none"
                           >
                             <option value="rating_1_to_5">1–5 Rating</option>
                             <option value="multiple_choice">Multiple Choice</option>
@@ -3424,7 +3445,7 @@ export function CoordinatorInterface({
                               onChange={(e) =>
                                 updateDraftQuestion(q.id, { required: e.target.checked })
                               }
-                              className="accent-[#24408E]"
+                              className="accent-[#24408E] rounded-none"
                             />
                             Required
                           </label>
@@ -3432,7 +3453,7 @@ export function CoordinatorInterface({
                             type="button"
                             onClick={() => removeDraftQuestion(q.id)}
                             title="Remove question"
-                            className="p-1.5 rounded text-[#5B6678] hover:text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
+                            className="p-1.5 rounded-none text-[#5B6678] hover:text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
                           >
                             <Trash2 className="size-3.5" />
                           </button>
@@ -3453,7 +3474,7 @@ export function CoordinatorInterface({
                                     .filter(Boolean),
                                 })
                               }
-                              className="w-full p-1.5 rounded bg-white border border-[#C9D0DB] text-[11px] text-[#18212F] focus:border-[#24408E] outline-none"
+                              className="w-full p-1.5 rounded-none bg-white border border-[#C9D0DB] text-[11px] text-[#18212F] focus:border-[#24408E] outline-none"
                             />
                           </div>
                         )}
@@ -3466,7 +3487,7 @@ export function CoordinatorInterface({
                     <button
                       type="button"
                       onClick={handleSaveSurveyDraft}
-                      className="px-4 py-2 rounded-md bg-[#1F7A4D] hover:bg-[#18633E] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      className="px-4 py-2 rounded-none bg-[#1F7A4D] hover:bg-[#18633E] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Save className="size-3.5" /> Save Survey Questionnaire
                     </button>
@@ -3479,7 +3500,7 @@ export function CoordinatorInterface({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-2">
-                  <Brain className="size-4 text-[#24408E]" /> Event Surveys &amp; AI Feedback Diagnostics
+                  <Brain className="size-4 text-[#24408E]" /> Event Surveys & AI Feedback Diagnostics
                 </h2>
                 <span className="text-[11px] text-[#5B6678]">
                   {approvedEvents.length} approved event{approvedEvents.length === 1 ? "" : "s"}
@@ -3487,7 +3508,7 @@ export function CoordinatorInterface({
               </div>
 
               {feedbackError && (
-                <div className="p-3 rounded-md bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
+                <div className="p-3 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
                   <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#B3261E]" />
                   <span>{feedbackError}</span>
                 </div>
@@ -3497,7 +3518,7 @@ export function CoordinatorInterface({
                 ? approvedEvents
                 : events.filter((e) => normalizedStatus(e.status) !== "rejected")
               ).length === 0 ? (
-                <div className="p-10 rounded-lg bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
+                <div className="p-10 rounded-none bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
                   No events available yet for post-event feedback analysis.
                 </div>
               ) : (
@@ -3527,25 +3548,25 @@ export function CoordinatorInterface({
                     return (
                       <div
                         key={ev.event_id}
-                        className="p-5 rounded-lg bg-white border border-[#DDE2EA] shadow-xs space-y-4"
+                        className="p-5 rounded-none bg-white border border-[#DDE2EA] shadow-xs space-y-4"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
                               <h3 className="text-sm font-bold text-[#18212F]">{ev.title}</h3>
                               {savedDraft && (
-                                <span className="px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
+                                <span className="px-2 py-0.5 rounded-none bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
                                   {savedDraft.questions.length} AI Questions Published
                                 </span>
                               )}
                               {isLiveResponses && (
-                                <span className="px-2 py-0.5 rounded bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] text-[10px] font-semibold">
+                                <span className="px-2 py-0.5 rounded-none bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] text-[10px] font-semibold">
                                   ● Live Public Responses
                                 </span>
                               )}
                             </div>
                             <p className="text-xs text-[#5B6678]">
-                              {ev.organization || "Student Org"} • {ev.event_date || "No date"}
+                              {ev.organization || "Student Org"} • {formatEventDateDisplay(ev.event_date)}
                             </p>
                           </div>
 
@@ -3555,7 +3576,7 @@ export function CoordinatorInterface({
                               onClick={() =>
                                 setExpandedFeedbackEventId(isExpanded ? null : ev.event_id)
                               }
-                              className="px-3 py-1.5 rounded-md bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-medium text-[#18212F] cursor-pointer"
+                              className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-medium text-[#18212F] cursor-pointer"
                             >
                               {isExpanded ? "Hide Responses" : `View / Add Responses (${responses.length})`}
                             </button>
@@ -3563,7 +3584,7 @@ export function CoordinatorInterface({
                               type="button"
                               disabled={isAnalyzing}
                               onClick={() => handleAnalyzeFeedbackWithAi(ev)}
-                              className="px-3.5 py-1.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              className="px-3.5 py-1.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                             >
                               {isAnalyzing ? (
                                 <>
@@ -3592,17 +3613,17 @@ export function CoordinatorInterface({
                         )}
 
                         <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-[#DDE2EA] text-center">
-                          <div className="p-2.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <div className="p-2.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
                             <div className="text-[10px] text-[#5B6678]">
                               {isLiveResponses ? "Live Responses" : "Sample Responses"}
                             </div>
                             <div className="text-sm font-bold text-[#18212F]">{responses.length}</div>
                           </div>
-                          <div className="p-2.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <div className="p-2.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
                             <div className="text-[10px] text-[#5B6678]">Avg Rating</div>
                             <div className="text-sm font-bold text-[#24408E]">{avgRating} / 5.0</div>
                           </div>
-                          <div className="p-2.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <div className="p-2.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
                             <div className="text-[10px] text-[#5B6678]">AI Sentiment</div>
                             <div
                               className={`text-sm font-bold ${
@@ -3624,7 +3645,7 @@ export function CoordinatorInterface({
 
                         {/* Collapsible Raw Survey Responses Input/Viewer */}
                         {isExpanded && (
-                          <div className="p-4 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-3">
+                          <div className="p-4 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-3">
                             <div className="text-[10px] font-mono font-semibold uppercase text-[#24408E]">
                               Attendee Responses Analyzed by AI
                             </div>
@@ -3632,7 +3653,7 @@ export function CoordinatorInterface({
                               <select
                                 value={newFeedbackRating}
                                 onChange={(e) => setNewFeedbackRating(Number(e.target.value))}
-                                className="p-2 rounded bg-white border border-[#C9D0DB] text-xs text-[#18212F] outline-none"
+                                className="p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] outline-none"
                               >
                                 {[5, 4, 3, 2, 1].map((r) => (
                                   <option key={r} value={r}>
@@ -3644,12 +3665,12 @@ export function CoordinatorInterface({
                                 value={newFeedbackComment}
                                 onChange={(e) => setNewFeedbackComment(e.target.value)}
                                 placeholder="Add a real student feedback response to include in AI analysis..."
-                                className="flex-1 min-w-[200px] p-2 rounded bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+                                className="flex-1 min-w-[200px] p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
                               />
                               <button
                                 type="button"
                                 onClick={() => handleAddFeedbackResponse(ev)}
-                                className="px-3 py-2 rounded bg-[#24408E] hover:bg-[#1B3270] text-xs font-semibold text-white cursor-pointer"
+                                className="px-3 py-2 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-xs font-semibold text-white cursor-pointer"
                               >
                                 Add
                               </button>
@@ -3658,7 +3679,7 @@ export function CoordinatorInterface({
                               {responses.map((r, i) => (
                                 <div
                                   key={i}
-                                  className="p-2.5 rounded bg-white border border-[#DDE2EA] text-[11px] flex items-start justify-between gap-3"
+                                  className="p-2.5 rounded-none bg-white border border-[#DDE2EA] text-[11px] flex items-start justify-between gap-3"
                                 >
                                   <span className="text-[#18212F]">{r.comment}</span>
                                   <span className="text-[#24408E] font-mono font-semibold shrink-0">
@@ -3672,13 +3693,13 @@ export function CoordinatorInterface({
 
                         {/* Structured AI Sentiment & Executive Diagnostics Panel */}
                         {analysis && (
-                          <div className="p-4 rounded-md bg-[#F7F8FA] border border-[#C5D3F3] space-y-3.5 text-xs">
+                          <div className="p-4 rounded-none bg-[#F7F8FA] border border-[#C5D3F3] space-y-3.5 text-xs">
                             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-2.5">
                               <span className="font-bold text-[#18212F] flex items-center gap-1.5">
                                 <Sparkles className="size-3.5 text-[#24408E]" /> AI Executive Sentiment Diagnostics
                               </span>
                               <span
-                                className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                                className={`px-2 py-0.5 rounded-none text-[11px] font-bold border ${
                                   analysis.overallSentiment === "Positive"
                                     ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
                                     : analysis.overallSentiment === "Mixed"
@@ -3690,7 +3711,7 @@ export function CoordinatorInterface({
                               </span>
                             </div>
 
-                            <div className="p-3 rounded bg-white border border-[#DDE2EA]">
+                            <div className="p-3 rounded-none bg-white border border-[#DDE2EA]">
                               <div className="text-[10px] font-bold uppercase tracking-wider text-[#24408E] mb-1">
                                 Executive Summary
                               </div>
@@ -3700,7 +3721,7 @@ export function CoordinatorInterface({
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div className="p-3 rounded bg-white border border-[#B6DFC8] space-y-1.5">
+                              <div className="p-3 rounded-none bg-white border border-[#B6DFC8] space-y-1.5">
                                 <div className="text-[10px] font-bold uppercase text-[#1F7A4D]">
                                   Key Strengths
                                 </div>
@@ -3711,7 +3732,7 @@ export function CoordinatorInterface({
                                 </ul>
                               </div>
 
-                              <div className="p-3 rounded bg-white border border-[#E5C98B] space-y-1.5">
+                              <div className="p-3 rounded-none bg-white border border-[#E5C98B] space-y-1.5">
                                 <div className="text-[10px] font-bold uppercase text-[#8A5A00]">
                                   Areas for Improvement
                                 </div>
@@ -3722,7 +3743,7 @@ export function CoordinatorInterface({
                                 </ul>
                               </div>
 
-                              <div className="p-3 rounded bg-white border border-[#C5D3F3] space-y-1.5">
+                              <div className="p-3 rounded-none bg-white border border-[#C5D3F3] space-y-1.5">
                                 <div className="text-[10px] font-bold uppercase text-[#24408E]">
                                   Actionable Recommendations
                                 </div>
@@ -3785,13 +3806,13 @@ export function CoordinatorInterface({
                   value={accountSearch}
                   onChange={(e) => setAccountSearch(e.target.value)}
                   placeholder="Search facilitator or org..."
-                  className="w-full pl-8 pr-3 py-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                  className="w-full pl-8 pr-3 py-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                 />
               </div>
             </div>
 
             {filteredFacilitators.length === 0 ? (
-              <div className="p-12 rounded-lg bg-white border border-[#DDE2EA] text-center space-y-2 shadow-xs">
+              <div className="p-12 rounded-none bg-white border border-[#DDE2EA] text-center space-y-2 shadow-xs">
                 <Users className="size-10 mx-auto text-[#24408E]/30 mb-2" />
                 <p className="text-sm font-bold text-[#18212F]">No Registered Facilitator Accounts Yet</p>
                 <p className="text-xs text-[#5B6678] max-w-md mx-auto">
@@ -3799,7 +3820,7 @@ export function CoordinatorInterface({
                 </p>
               </div>
             ) : (
-              <div className="rounded-lg bg-white border border-[#DDE2EA] overflow-x-auto shadow-xs">
+              <div className="rounded-none bg-white border border-[#DDE2EA] overflow-x-auto shadow-xs">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-[#F7F8FA] border-b border-[#DDE2EA] text-[10px] font-mono font-semibold text-[#24408E] uppercase">
@@ -3820,7 +3841,7 @@ export function CoordinatorInterface({
                         <td className="p-3.5 text-[#24408E] font-medium">{acc.organization}</td>
                         <td className="p-3.5 text-[#5B6678]">{acc.last_active}</td>
                         <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] text-[10px] font-bold">
+                          <span className="px-2 py-0.5 rounded-none bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] text-[10px] font-bold">
                             ● {acc.status}
                           </span>
                         </td>
@@ -3837,7 +3858,7 @@ export function CoordinatorInterface({
       {/* Revision Modal */}
       {showRevisionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18212F]/50 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-lg bg-white border border-[#DDE2EA] p-6 shadow-xl text-left">
+          <div className="w-full max-w-md rounded-none bg-white border border-[#DDE2EA] p-6 shadow-xl text-left">
             <h3 className="text-base font-bold text-[#18212F] mb-2">Request Revisions</h3>
             <p className="text-xs text-[#5B6678] mb-4">
               Enter the feedback or document corrections required by the SAO Office:
@@ -3847,13 +3868,13 @@ export function CoordinatorInterface({
               value={revisionFeedback}
               onChange={(e) => setRevisionFeedback(e.target.value)}
               placeholder="e.g., Please update the schedule and attach the endorsed APF with adviser signature..."
-              className="w-full p-3 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] outline-none focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 resize-none mb-4"
+              className="w-full p-3 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] outline-none focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 resize-none mb-4"
             />
             <div className="flex justify-end gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowRevisionModal(false)}
-                className="px-4 py-2 rounded-md text-xs font-medium text-[#18212F] hover:bg-[#F2F4F7] border border-[#C9D0DB] cursor-pointer"
+                className="px-4 py-2 rounded-none text-xs font-medium text-[#18212F] hover:bg-[#F2F4F7] border border-[#C9D0DB] cursor-pointer"
               >
                 Cancel
               </button>
@@ -3861,7 +3882,7 @@ export function CoordinatorInterface({
                 type="button"
                 onClick={() => handleUpdateStatus("revision", revisionFeedback)}
                 disabled={!revisionFeedback.trim() || actionLoading}
-                className="px-5 py-2 rounded-md text-xs font-semibold bg-[#24408E] hover:bg-[#1B3270] text-white disabled:opacity-40 cursor-pointer"
+                className="px-5 py-2 rounded-none text-xs font-semibold bg-[#24408E] hover:bg-[#1B3270] text-white disabled:opacity-40 cursor-pointer"
               >
                 Send Revision Request
               </button>
