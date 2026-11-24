@@ -171,7 +171,7 @@ export default function App() {
         user_id: dbUser.user_id,
         full_name: dbUser.full_name,
         email: dbUser.email,
-        organization: dbUser.organization || "Student Organization",
+        organization: dbUser.organization || "Organization",
       };
 
       localStorage.setItem("campussync_facilitator_profile", JSON.stringify(profile));
@@ -252,13 +252,13 @@ export default function App() {
         <header className="w-full flex items-center justify-between z-10 shrink-0">
           {/* Brand Mark with Accent C */}
           <div className="flex items-center gap-3">
-            <div className="size-9 bg-[#0B132B] flex items-center justify-center font-black text-[#FFD000] text-lg border border-white/10 shadow-md">
+            <div className="size-9 rounded-none bg-[#0B132B] flex items-center justify-center font-black text-[#FFD000] text-lg border border-white/10 shadow-md">
               C
             </div>
             <div className="text-left">
               <div className="flex items-center gap-2">
                 <span className="font-black text-lg text-white tracking-tight">CampusSync</span>
-                <span className="bg-[#0B132B] text-[#FFD000] text-[10px] font-mono font-bold px-2 py-0.5 uppercase tracking-wider border border-white/10">
+                <span className="rounded-none bg-[#0B132B] text-[#FFD000] text-[10px] font-mono font-bold px-2 py-0.5 uppercase tracking-wider border border-white/10">
                   FACILITATOR
                 </span>
               </div>
@@ -267,15 +267,15 @@ export default function App() {
           </div>
 
           {/* Institutional Telemetry Status Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#0B132B] border border-white/15 text-white text-xs font-semibold shadow-md">
-            <span className="size-2 bg-blue-500"></span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-none bg-[#0B132B] border border-white/15 text-white text-xs font-semibold shadow-md">
+            <span className="size-2 rounded-none bg-blue-500"></span>
             CAMPUSSYNC: FACILITATOR PORTAL
           </div>
         </header>
 
         {/* ── Main Left-Weighted Auth Terminal ── */}
         <main className="w-full my-auto py-8 z-10 flex items-center justify-start lg:pl-16">
-          <div className="w-full max-w-[440px] bg-[#0E1528] border border-white/10 shadow-2xl p-8 md:p-10 text-left">
+          <div className="w-full max-w-[440px] rounded-none bg-[#0E1528] border border-white/10 shadow-2xl p-8 md:p-10 text-left">
             {/* Terminal Meta Header */}
             <div className="flex items-center justify-between text-[10px] font-mono tracking-widest text-[#FFD000] mb-3 uppercase">
               <span>AUTHORIZED PROPOSAL DRAFTING</span>
@@ -283,7 +283,7 @@ export default function App() {
             </div>
 
             {/* Login / Sign Up Mode Switcher */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-[#080D1A] border border-white/10 mb-5 text-xs">
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-none bg-[#080D1A] border border-white/10 mb-5 text-xs">
               <button
                 type="button"
                 onClick={() => {
@@ -291,7 +291,7 @@ export default function App() {
                   setErrorMessage("");
                   setSuccessMessage("");
                 }}
-                className={`py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
+                className={`py-2 rounded-none font-bold uppercase tracking-wider transition cursor-pointer ${
                   authMode === "login"
                     ? "bg-[#FDB813] text-black"
                     : "text-slate-400 hover:text-white"
@@ -306,7 +306,7 @@ export default function App() {
                   setErrorMessage("");
                   setSuccessMessage("");
                 }}
-                className={`py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
+                className={`py-2 rounded-none font-bold uppercase tracking-wider transition cursor-pointer ${
                   authMode === "signup"
                     ? "bg-[#FDB813] text-black"
                     : "text-slate-400 hover:text-white"
@@ -328,14 +328,14 @@ export default function App() {
 
             {/* Error & Success Alerts */}
             {errorMessage && (
-              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2">
+              <div className="mb-4 p-3 rounded-none bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2">
                 <AlertCircle className="size-4 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
             )}
 
             {successMessage && (
-              <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2">
+              <div className="mb-4 p-3 rounded-none bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2">
                 <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
                 <span>{successMessage}</span>
               </div>
@@ -355,7 +355,7 @@ export default function App() {
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="e.g., Andrei Antonio G. Villa"
-                      className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
+                      className="w-full px-3.5 py-2.5 rounded-none bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
                     />
                   </div>
 
@@ -369,7 +369,7 @@ export default function App() {
                       value={organization}
                       onChange={(e) => setOrganization(e.target.value)}
                       placeholder="e.g., CS Society / Student Council"
-                      className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
+                      className="w-full px-3.5 py-2.5 rounded-none bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
                     />
                   </div>
                 </>
@@ -385,7 +385,7 @@ export default function App() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="facilitator@organization.edu"
-                  className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
+                  className="w-full px-3.5 py-2.5 rounded-none bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
                 />
               </div>
 
@@ -400,7 +400,7 @@ export default function App() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
+                    className="w-full px-3.5 py-2.5 rounded-none bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition"
                   />
                   <button
                     type="button"
@@ -418,7 +418,7 @@ export default function App() {
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="bg-[#080D1A] border-white/20 text-[#FFD000] focus:ring-0 cursor-pointer"
+                    className="rounded-none bg-[#080D1A] border-white/20 text-[#FFD000] focus:ring-0 cursor-pointer"
                   />
                   Remember Me
                 </label>
@@ -432,7 +432,7 @@ export default function App() {
               <button
                 type="submit"
                 disabled={authLoading}
-                className="w-full py-3 bg-[#FDB813] hover:bg-[#e0a20f] text-black font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition shadow-lg cursor-pointer mt-4 disabled:opacity-50"
+                className="w-full py-3 rounded-none bg-[#FDB813] hover:bg-[#e0a20f] text-black font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition shadow-lg cursor-pointer mt-4 disabled:opacity-50"
               >
                 {authLoading
                   ? "Processing..."
@@ -444,7 +444,7 @@ export default function App() {
 
             <div className="mt-8 pt-4 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-white/50">
               <span className="flex items-center gap-1.5">
-                <span className="size-1.5 bg-[#FFD000]"></span>
+                <span className="size-1.5 rounded-none bg-[#FFD000]"></span>
                 Campus Clearance Portal
               </span>
               <span>Multi-Tenant Edition</span>
