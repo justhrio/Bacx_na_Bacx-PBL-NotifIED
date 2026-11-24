@@ -5,6 +5,8 @@ import { env } from "./config/env.js";
 import { GEMINI_MODEL } from "./config/gemini.js";
 import { getSupabaseAdmin } from "./config/supabase.js";
 import aiRoutes from "./routes/aiRoutes.js";
+import emailRoutes from "./routes/emailRoutes.js";
+import { getEmailProviderStatus } from "./services/emailService.js";
 
 const app = express();
 
@@ -27,7 +29,7 @@ app.use(
       }
       callback(new Error(`CORS origin not allowed: ${origin}`));
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
@@ -42,27 +44,39 @@ app.get("/", (_req: Request, res: Response) => {
     service: "campussync-ai-backend",
     model: GEMINI_MODEL,
     geminiConfigured: Boolean(env.geminiApiKey),
+    emailProvider: getEmailProviderStatus().provider,
     endpoints: [
       "GET /api/health",
       "POST /api/ai/prescreen",
       "POST /api/ai/triage",
       "POST /api/ai/surveys/generate",
+      "POST /api/ai/surveys/publish",
+      "GET /api/ai/surveys/public/:token",
+      "POST /api/ai/surveys/public/:token/responses",
       "POST /api/ai/surveys/analyze",
+      "POST /api/ai/syndicate-email",
+      "GET /api/email/recipients",
+      "POST /api/email/recipients",
+      "GET /api/email/dispatches",
     ],
   });
 });
 
 app.get("/api/health", (_req: Request, res: Response) => {
+  const emailStatus = getEmailProviderStatus();
   res.json({
     status: "ok",
     service: "campussync-ai-backend",
     model: GEMINI_MODEL,
     geminiConfigured: Boolean(env.geminiApiKey),
     supabaseStorageConfigured: Boolean(getSupabaseAdmin()),
+    emailConfigured: emailStatus.configured,
+    emailProvider: emailStatus.provider,
   });
 });
 
 app.use("/api/ai", aiRoutes);
+app.use("/api/email", emailRoutes);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) {

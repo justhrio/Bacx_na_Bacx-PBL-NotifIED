@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { env } from "./env.js";
 
 let supabaseAdmin: SupabaseClient | null = null;
+let supabaseFallback: SupabaseClient | null = null;
 
 export function getSupabaseAdmin(): SupabaseClient | null {
   if (!env.supabaseUrl || !env.supabaseServiceRoleKey) {
@@ -16,6 +17,27 @@ export function getSupabaseAdmin(): SupabaseClient | null {
     });
   }
   return supabaseAdmin;
+}
+
+/**
+ * Returns a Supabase client for server-side DB reads/writes.
+ * Prefers SUPABASE_SERVICE_ROLE_KEY; falls back to SUPABASE_ANON_KEY when explicitly provided.
+ */
+export function getSupabaseClient(): SupabaseClient | null {
+  const admin = getSupabaseAdmin();
+  if (admin) return admin;
+  if (!env.supabaseUrl || !env.supabaseAnonKey) {
+    return null;
+  }
+  if (!supabaseFallback) {
+    supabaseFallback = createClient(env.supabaseUrl, env.supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+  return supabaseFallback;
 }
 
 /**

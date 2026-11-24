@@ -470,6 +470,322 @@ export async function analyzeAiSurveyFeedback(
 }
 
 // ============================================================================
+// 5. Institutional Email Syndication & Public Survey APIs
+// ============================================================================
+
+export type RecipientRole = "student" | "faculty" | "staff";
+export type DispatchStatus = "PENDING_SURVEY" | "SENDING" | "SENT" | "FAILED";
+
+export interface InstitutionalRecipientRecord {
+  id: string;
+  full_name: string;
+  email: string;
+  role: RecipientRole;
+  department: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmailProviderStatus {
+  provider: "smtp" | "resend" | "unconfigured";
+  configured: boolean;
+  fromAddress: string | null;
+  detail: string;
+}
+
+export interface EmailDispatchRecord {
+  id: string;
+  proposal_id: number;
+  survey_id: string | null;
+  survey_url: string | null;
+  status: DispatchStatus;
+  target_groups: RecipientRole[];
+  recipient_count: number;
+  email_subject: string | null;
+  email_html_preview: string | null;
+  email_text_fallback: string | null;
+  sent_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublishedSurveyResponse {
+  surveyId: string;
+  surveyToken: string;
+  surveyUrl: string;
+  survey: {
+    id: string;
+    survey_token: string;
+    event_id: number;
+    survey_title: string;
+    description: string;
+    questions: GeneratedSurveyQuestion[];
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    event_meta?: {
+      title: string;
+      organization?: string;
+      event_date?: string;
+      venue?: string;
+    };
+  };
+}
+
+export interface SyndicateEmailParams {
+  proposalId: number;
+  surveyId?: string | null;
+  surveyToken?: string | null;
+  surveyUrl: string;
+  targetRoles?: RecipientRole[];
+  eventSnapshot?: Record<string, unknown>;
+  fallbackRecipients?: InstitutionalRecipientRecord[];
+  posterUrls?: Array<{ url: string; filename?: string; mimeType?: string }>;
+  posterFiles?: File[];
+}
+
+export interface SyndicateEmailResponse {
+  dispatch: EmailDispatchRecord;
+  provider?: "smtp" | "resend";
+  batchCount?: number;
+  modelUsed?: string;
+  emailProvider?: EmailProviderStatus;
+  error?: string;
+}
+
+export async function publishAiSurvey(params: {
+  eventId: number;
+  surveyToken?: string;
+  survey: GeneratedSurveyResult;
+  publicBaseUrl?: string;
+  eventMeta?: {
+    title: string;
+    organization?: string;
+    event_date?: string;
+    venue?: string;
+  };
+}): Promise<PublishedSurveyResponse> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/ai/surveys/publish`;
+  const res = await safeFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return handleApiResponse<PublishedSurveyResponse>(endpoint, res);
+}
+
+export async function fetchPublicSurveyFromBackend(
+  token: string
+): Promise<PublishedSurveyResponse["survey"] | null> {
+  const baseUrl = getAiBackendUrl();
+  if (!baseUrl) return null;
+  try {
+    const res = await fetch(
+      `${baseUrl}/api/ai/surveys/public/${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.survey ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function submitPublicSurveyResponseToBackend(
+  token: string,
+  payload: {
+    eventId?: number;
+    surveyId?: string | null;
+    respondentRole: string;
+    overallRating: number | null;
+    comment: string | null;
+    answers: Record<string, string | number>;
+  }
+): Promise<boolean> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/ai/surveys/public/${encodeURIComponent(token)}/responses`;
+  const res = await safeFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await handleApiResponse(endpoint, res);
+  return true;
+}
+
+export async function fetchBackendSurveyResponses(
+  eventId: number
+): Promise<SurveyResponseEntry[]> {
+  const baseUrl = getAiBackendUrl();
+  if (!baseUrl) return [];
+  try {
+    const res = await fetch(`${baseUrl}/api/ai/surveys/event/${eventId}/responses`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data?.responses)) return [];
+    return data.responses.map((r: any) => ({
+      rating: typeof r.overall_rating === "number" ? r.overall_rating : undefined,
+      comment: r.comment || "",
+      answers: r.answers || undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function syndicateEventEmail(
+  params: SyndicateEmailParams
+): Promise<SyndicateEmailResponse> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/ai/syndicate-email`;
+
+  // Filter poster attachments strictly under 2.5 MB to stay safely within serverless limits
+  const eligibleFiles = (params.posterFiles || [])
+    .filter((f) => f.size > 0 && f.size <= 2.5 * 1024 * 1024)
+    .slice(0, 2);
+
+  let res: Response;
+  if (eligibleFiles.length > 0) {
+    const formData = new FormData();
+    eligibleFiles.forEach((file) => formData.append("poster", file));
+    formData.append("proposalId", String(params.proposalId));
+    if (params.surveyId) formData.append("surveyId", params.surveyId);
+    if (params.surveyToken) formData.append("surveyToken", params.surveyToken);
+    formData.append("surveyUrl", params.surveyUrl);
+    if (params.targetRoles) {
+      formData.append("targetRoles", JSON.stringify(params.targetRoles));
+    }
+    if (params.eventSnapshot) {
+      formData.append("eventSnapshot", JSON.stringify(params.eventSnapshot));
+    }
+    if (params.fallbackRecipients) {
+      formData.append("fallbackRecipients", JSON.stringify(params.fallbackRecipients));
+    }
+    if (params.posterUrls && params.posterUrls.length > 0) {
+      formData.append("posterUrls", JSON.stringify(params.posterUrls));
+    }
+    res = await safeFetch(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+  } else {
+    res = await safeFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        proposalId: params.proposalId,
+        surveyId: params.surveyId,
+        surveyToken: params.surveyToken,
+        surveyUrl: params.surveyUrl,
+        targetRoles: params.targetRoles,
+        eventSnapshot: params.eventSnapshot,
+        fallbackRecipients: params.fallbackRecipients,
+        posterUrls: params.posterUrls,
+      }),
+    });
+  }
+
+  let payload: any = null;
+  let rawText = "";
+  try {
+    rawText = await res.text();
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    // Non-JSON response
+  }
+
+  // On 502 delivery failure, backend still returns the saved FAILED dispatch record + AI HTML preview
+  if (payload?.dispatch) {
+    return payload as SyndicateEmailResponse;
+  }
+
+  if (!res.ok) {
+    console.error("[CampusSync AI] Email syndication error:", {
+      url: endpoint,
+      status: res.status,
+      error: payload?.error ?? rawText,
+    });
+    throw new Error(sanitizeErrorMessage(payload?.error || rawText, res.status));
+  }
+
+  return payload as SyndicateEmailResponse;
+}
+
+export async function fetchBackendEmailRecipients(): Promise<{
+  recipients: InstitutionalRecipientRecord[];
+  storage: "supabase" | "memory";
+  emailProvider: EmailProviderStatus;
+} | null> {
+  const baseUrl = getAiBackendUrl();
+  if (!baseUrl) return null;
+  try {
+    const res = await fetch(`${baseUrl}/api/email/recipients`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function createBackendEmailRecipient(input: {
+  full_name: string;
+  email: string;
+  role: RecipientRole;
+  department: string;
+  is_active?: boolean;
+}): Promise<InstitutionalRecipientRecord> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/email/recipients`;
+  const res = await safeFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await handleApiResponse<{ recipient: InstitutionalRecipientRecord }>(endpoint, res);
+  return data.recipient;
+}
+
+export async function updateBackendEmailRecipient(
+  id: string,
+  patch: Partial<Pick<InstitutionalRecipientRecord, "full_name" | "email" | "role" | "department" | "is_active">>
+): Promise<InstitutionalRecipientRecord> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/email/recipients/${encodeURIComponent(id)}`;
+  const res = await safeFetch(endpoint, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await handleApiResponse<{ recipient: InstitutionalRecipientRecord }>(endpoint, res);
+  return data.recipient;
+}
+
+export async function deleteBackendEmailRecipient(id: string): Promise<void> {
+  const baseUrl = requireAiBackendUrl();
+  const endpoint = `${baseUrl}/api/email/recipients/${encodeURIComponent(id)}`;
+  const res = await safeFetch(endpoint, { method: "DELETE" });
+  await handleApiResponse(endpoint, res);
+}
+
+export async function fetchBackendEmailDispatches(): Promise<{
+  dispatches: EmailDispatchRecord[];
+  emailProvider: EmailProviderStatus;
+} | null> {
+  const baseUrl = getAiBackendUrl();
+  if (!baseUrl) return null;
+  try {
+    const res = await fetch(`${baseUrl}/api/email/dispatches`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
 // Graceful Local Cache Fallback (when optional Supabase JSONB columns don't exist)
 // ============================================================================
 
@@ -497,7 +813,15 @@ const CACHE_KEYS = {
   triage: "campussync_ai_triage_cache",
   surveyDraft: "campussync_ai_survey_draft_cache",
   feedbackAnalysis: "campussync_ai_feedback_analysis_cache",
+  emailDispatch: "campussync_email_dispatch_cache",
+  publishedSurvey: "campussync_published_survey_cache",
 };
+
+export interface CachedPublishedSurveyMeta {
+  surveyId: string;
+  surveyToken: string;
+  surveyUrl: string;
+}
 
 export const aiLocalCache = {
   getPreScreens: () => readCacheMap<PreScreenResult>(CACHE_KEYS.prescreen),
@@ -516,4 +840,14 @@ export const aiLocalCache = {
     readCacheMap<SurveyDiagnosticsResult>(CACHE_KEYS.feedbackAnalysis),
   saveFeedbackAnalysis: (eventId: number | string, result: SurveyDiagnosticsResult) =>
     writeCacheEntry(CACHE_KEYS.feedbackAnalysis, eventId, result),
+
+  getEmailDispatches: () => readCacheMap<EmailDispatchRecord>(CACHE_KEYS.emailDispatch),
+  saveEmailDispatch: (eventId: number | string, dispatch: EmailDispatchRecord) =>
+    writeCacheEntry(CACHE_KEYS.emailDispatch, eventId, dispatch),
+
+  getPublishedSurveys: () =>
+    readCacheMap<CachedPublishedSurveyMeta>(CACHE_KEYS.publishedSurvey),
+  savePublishedSurvey: (eventId: number | string, meta: CachedPublishedSurveyMeta) =>
+    writeCacheEntry(CACHE_KEYS.publishedSurvey, eventId, meta),
 };
+

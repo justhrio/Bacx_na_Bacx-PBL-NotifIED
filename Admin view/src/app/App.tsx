@@ -32,23 +32,36 @@ import {
   Brain,
   Save,
   Paperclip,
+  Mail,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
   aiLocalCache,
   analyzeAiSurveyFeedback,
+  createBackendEmailRecipient,
+  deleteBackendEmailRecipient,
   deriveAuditStatus,
   extractDefectItems,
+  fetchBackendEmailDispatches,
+  fetchBackendEmailRecipients,
   fetchEventDocuments,
   formatDefectsForRevisionNote,
   generateAiSurvey,
+  publishAiSurvey,
   runBatchProposalTriage,
   runDocumentPreScreen,
   runProposalTriage,
+  syndicateEventEmail,
+  updateBackendEmailRecipient,
+  type CachedPublishedSurveyMeta,
+  type EmailDispatchRecord,
+  type EmailProviderStatus,
   type GeneratedQuestionType,
   type GeneratedSurveyQuestion,
   type GeneratedSurveyResult,
+  type InstitutionalRecipientRecord,
   type PreScreenResult,
+  type RecipientRole,
   type StoredEventDocumentMeta,
   type SurveyDiagnosticsResult,
   type SurveyResponseEntry,
@@ -61,6 +74,12 @@ import {
   encodeProposalDescriptionWithAttachments,
   isFreshProcessingState,
 } from "../lib/proposalAttachments";
+import { PublicSurveyPage } from "./components/PublicSurveyPage";
+import {
+  EmailPreviewModal,
+  EmailSyndicationStatusCard,
+  InstitutionalMailingListView,
+} from "./components/EmailSyndicationComponents";
 import adminBg from "../assets/admin-bg.jpeg";
 
 // Designated prototype coordinator credentials (or accept any valid @apc.edu.ph staff/admin email)
@@ -137,7 +156,48 @@ const DEFAULT_ANNOUNCEMENTS: AnnouncementItem[] = [
   },
 ];
 
+function getPublicSurveyTokenFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const pathMatch = window.location.pathname.match(/^\/survey\/([^/]+)\/?$/i);
+  if (pathMatch && pathMatch[1]) {
+    try {
+      return decodeURIComponent(pathMatch[1]);
+    } catch {
+      return pathMatch[1];
+    }
+  }
+  const searchParams = new URLSearchParams(window.location.search);
+  const queryToken = searchParams.get("survey")?.trim();
+  return queryToken || null;
+}
+
+async function computeSha256Hex(payload: string): Promise<string> {
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const encoded = new TextEncoder().encode(payload);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+  // Fallback deterministic 64-hex hash if subtle crypto is unavailable in an insecure context
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < payload.length; i++) {
+    const ch = payload.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  const partA = (h1 >>> 0).toString(16).padStart(8, "0");
+  const partB = (h2 >>> 0).toString(16).padStart(8, "0");
+  return `${partA}${partB}`.repeat(4).slice(0, 64);
+}
+
 export default function CoordinatorView() {
+  const publicSurveyToken = getPublicSurveyTokenFromLocation();
+  if (publicSurveyToken) {
+    return <PublicSurveyPage surveyToken={publicSurveyToken} />;
+  }
+
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -435,7 +495,7 @@ export function CoordinatorInterface({
   coordinatorEmail?: string;
 }) {
   // Always lands on Home upon logging in
-  const [activeNav, setActiveNav] = useState<"home" | "approvals" | "surveys" | "accounts">("home");
+  const [activeNav, setActiveNav] = useState<"home" | "approvals" | "surveys" | "mailing" | "accounts">("home");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const [events, setEvents] = useState<EventRecord[]>([]);
@@ -482,9 +542,15 @@ export function CoordinatorInterface({
     Record<string, GeneratedSurveyResult>
   >(() => aiLocalCache.getSurveyDrafts());
   const [surveySaveMessage, setSurveySaveMessage] = useState("");
+  const [publishedSurveysMap, setPublishedSurveysMap] = useState<
+    Record<string, CachedPublishedSurveyMeta>
+  >(() => aiLocalCache.getPublishedSurveys());
 
   // ── AI Feature 4: Post-Event Survey Sentiment & Diagnostics State ──
   const [feedbackResponsesByEvent, setFeedbackResponsesByEvent] = useState<
+    Record<number, SurveyResponseEntry[]>
+  >({});
+  const [liveResponsesByEvent, setLiveResponsesByEvent] = useState<
     Record<number, SurveyResponseEntry[]>
   >({});
   const [feedbackAnalysisMap, setFeedbackAnalysisMap] = useState<
@@ -496,6 +562,23 @@ export function CoordinatorInterface({
   const [newFeedbackRating, setNewFeedbackRating] = useState(5);
   const [newFeedbackComment, setNewFeedbackComment] = useState("");
 
+  // ── AI Feature 5: Automated Institutional Email Syndication State ──
+  const [surveyTargetGroups, setSurveyTargetGroups] = useState<RecipientRole[]>([
+    "student",
+    "faculty",
+  ]);
+  const [mailingRecipients, setMailingRecipients] = useState<InstitutionalRecipientRecord[]>([]);
+  const [emailProviderStatus, setEmailProviderStatus] = useState<EmailProviderStatus | null>(null);
+  const [mailingLoading, setMailingLoading] = useState(false);
+  const [emailDispatchesList, setEmailDispatchesList] = useState<EmailDispatchRecord[]>(() =>
+    Object.values(aiLocalCache.getEmailDispatches())
+  );
+  const [dispatchMap, setDispatchMap] = useState<Record<string, EmailDispatchRecord>>(() =>
+    aiLocalCache.getEmailDispatches()
+  );
+  const [syndicatingEventId, setSyndicatingEventId] = useState<number | null>(null);
+  const [previewDispatch, setPreviewDispatch] = useState<EmailDispatchRecord | null>(null);
+
   const getEventTriage = (ev: EventRecord): TriageResult | undefined =>
     ev.ai_triage_result || triageMap[String(ev.event_id)];
 
@@ -503,6 +586,45 @@ export function CoordinatorInterface({
     ev.ai_prescreen_result ||
     decodeProposalDescription(ev.description).preScreen ||
     preScreenMap[String(ev.event_id)];
+
+  const getEventPublishedSurvey = (ev: EventRecord): CachedPublishedSurveyMeta | null => {
+    const cached = publishedSurveysMap[String(ev.event_id)];
+    if (cached) return cached;
+    const carried = decodeProposalDescription(ev.description).publishedSurvey;
+    if (carried) {
+      return {
+        surveyId: carried.surveyId,
+        surveyToken: carried.surveyToken,
+        surveyUrl: carried.surveyUrl,
+      };
+    }
+    return null;
+  };
+
+  const getEventDispatch = (ev: EventRecord): EmailDispatchRecord | null => {
+    const fromMap = dispatchMap[String(ev.event_id)];
+    if (fromMap) return fromMap;
+    const carried = decodeProposalDescription(ev.description).emailDispatch;
+    if (carried) {
+      return {
+        id: carried.id,
+        proposal_id: ev.event_id,
+        survey_id: null,
+        survey_url: carried.surveyUrl,
+        status: carried.status,
+        target_groups: carried.targetGroups,
+        recipient_count: carried.recipientCount,
+        email_subject: carried.emailSubject,
+        email_html_preview: null,
+        email_text_fallback: null,
+        sent_at: carried.sentAt,
+        error_message: carried.errorMessage,
+        created_at: carried.sentAt || ev.created_at || new Date().toISOString(),
+        updated_at: carried.sentAt || ev.created_at || new Date().toISOString(),
+      };
+    }
+    return null;
+  };
 
   const [dbError, setDbError] = useState("");
 
@@ -628,10 +750,146 @@ export function CoordinatorInterface({
     }
   };
 
+  // Sync Institutional Mailing List, Email Dispatches, Published Surveys, and Live Survey Responses
+  const fetchSyndicationData = async () => {
+    setMailingLoading(true);
+    try {
+      // 1. Institutional Recipients (Supabase primary, backend fallback)
+      const [dbRecRes, backendRecRes] = await Promise.all([
+        supabase
+          .from("institutional_recipients")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        fetchBackendEmailRecipients(),
+      ]);
+
+      if (backendRecRes?.emailProvider) {
+        setEmailProviderStatus(backendRecRes.emailProvider);
+      }
+
+      if (!dbRecRes.error && Array.isArray(dbRecRes.data)) {
+        setMailingRecipients(dbRecRes.data as InstitutionalRecipientRecord[]);
+      } else if (backendRecRes?.recipients) {
+        setMailingRecipients(backendRecRes.recipients);
+      }
+
+      // 2. Email Dispatches (Supabase primary, backend & local cache merged)
+      const [dbDispRes, backendDispRes] = await Promise.all([
+        supabase
+          .from("email_dispatches")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(50),
+        fetchBackendEmailDispatches(),
+      ]);
+
+      if (backendDispRes?.emailProvider) {
+        setEmailProviderStatus(backendDispRes.emailProvider);
+      }
+
+      const combinedDispatches: EmailDispatchRecord[] = [];
+      const seenIds = new Set<string>();
+      const sources = [
+        ...(!dbDispRes.error && Array.isArray(dbDispRes.data)
+          ? (dbDispRes.data as EmailDispatchRecord[])
+          : []),
+        ...(backendDispRes?.dispatches || []),
+        ...Object.values(aiLocalCache.getEmailDispatches()),
+      ];
+      for (const item of sources) {
+        if (!item?.id || seenIds.has(item.id)) continue;
+        seenIds.add(item.id);
+        combinedDispatches.push(item);
+      }
+      combinedDispatches.sort(
+        (a, b) =>
+          new Date(b.created_at || b.updated_at).getTime() -
+          new Date(a.created_at || a.updated_at).getTime()
+      );
+      setEmailDispatchesList(combinedDispatches);
+
+      const latestByProposal: Record<string, EmailDispatchRecord> = {};
+      for (const d of combinedDispatches) {
+        const key = String(d.proposal_id);
+        if (!latestByProposal[key]) {
+          latestByProposal[key] = d;
+          aiLocalCache.saveEmailDispatch(d.proposal_id, d);
+        }
+      }
+      if (Object.keys(latestByProposal).length > 0) {
+        setDispatchMap((prev) => ({ ...prev, ...latestByProposal }));
+      }
+
+      // 3. Published Event Surveys (Supabase event_surveys)
+      const { data: surveyRows, error: surveyErr } = await supabase
+        .from("event_surveys")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (!surveyErr && Array.isArray(surveyRows) && surveyRows.length > 0) {
+        const origin =
+          typeof window !== "undefined"
+            ? window.location.origin
+            : "https://adminview-eight.vercel.app";
+        const nextPublished: Record<string, CachedPublishedSurveyMeta> = {};
+        const nextDrafts: Record<string, GeneratedSurveyResult> = {};
+        for (const row of surveyRows as any[]) {
+          const key = String(row.event_id);
+          if (!nextPublished[key]) {
+            const meta: CachedPublishedSurveyMeta = {
+              surveyId: row.id,
+              surveyToken: row.survey_token,
+              surveyUrl: `${origin}/survey/${row.survey_token}`,
+            };
+            nextPublished[key] = meta;
+            aiLocalCache.savePublishedSurvey(row.event_id, meta);
+            if (Array.isArray(row.questions)) {
+              const draft: GeneratedSurveyResult = {
+                surveyTitle: row.survey_title,
+                description: row.description || "",
+                questions: row.questions,
+              };
+              nextDrafts[key] = draft;
+              aiLocalCache.saveSurveyDraft(row.event_id, draft);
+            }
+          }
+        }
+        setPublishedSurveysMap((prev) => ({ ...prev, ...nextPublished }));
+        setSavedSurveyDrafts((prev) => ({ ...prev, ...nextDrafts }));
+      }
+
+      // 4. Live Public Survey Responses (Supabase survey_responses)
+      const { data: respRows, error: respErr } = await supabase
+        .from("survey_responses")
+        .select("*")
+        .order("submitted_at", { ascending: false });
+
+      if (!respErr && Array.isArray(respRows)) {
+        const grouped: Record<number, SurveyResponseEntry[]> = {};
+        for (const row of respRows as any[]) {
+          const evId = Number(row.event_id);
+          if (!Number.isFinite(evId)) continue;
+          if (!grouped[evId]) grouped[evId] = [];
+          grouped[evId].push({
+            rating: typeof row.overall_rating === "number" ? row.overall_rating : undefined,
+            comment: row.comment || "",
+            answers: row.answers || undefined,
+          });
+        }
+        setLiveResponsesByEvent(grouped);
+      }
+    } catch (err) {
+      console.warn("[CampusSync] Syndication sync warning:", err);
+    } finally {
+      setMailingLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchQueue();
     fetchFacilitatorAccounts();
     fetchAnnouncements();
+    void fetchSyndicationData();
 
     const channel = supabase
       .channel("events-queue-channel")
@@ -640,6 +898,27 @@ export function CoordinatorInterface({
         { event: "*", schema: "public", table: "events" },
         () => {
           fetchQueue();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "email_dispatches" },
+        () => {
+          void fetchSyndicationData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "survey_responses" },
+        () => {
+          void fetchSyndicationData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "institutional_recipients" },
+        () => {
+          void fetchSyndicationData();
         }
       )
       .subscribe();
@@ -708,6 +987,8 @@ export function CoordinatorInterface({
       preScreen: result,
       aiStatus: status,
       aiUpdatedAt: new Date().toISOString(),
+      publishedSurvey: decoded.publishedSurvey,
+      emailDispatch: decoded.emailDispatch,
     });
 
     const { error: extErr } = await supabase
@@ -954,7 +1235,350 @@ export function CoordinatorInterface({
     }
   };
 
-  // ── AI Handler 3: Generate Post-Event Survey with AI ──
+  // ── AI Feature 5 Helper: Publish Public Survey & Trigger Automated Institutional Email Syndication ──
+  const publishSurveyForEvent = async (
+    targetEv: EventRecord,
+    draft: GeneratedSurveyResult,
+    existingToken?: string
+  ): Promise<CachedPublishedSurveyMeta> => {
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "https://adminview-eight.vercel.app";
+    const randomPart =
+      typeof crypto !== "undefined" && crypto.getRandomValues
+        ? Array.from(crypto.getRandomValues(new Uint8Array(5)))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+        : Math.random().toString(36).slice(2, 10);
+
+    const token = existingToken || `srv_${targetEv.event_id}_${randomPart}`;
+    let surveyId = token;
+    let surveyUrl = `${origin}/survey/${token}`;
+
+    // 1. Persist directly to Supabase public.event_surveys so standalone public links work globally
+    try {
+      const { data: upserted, error: upsertErr } = await supabase
+        .from("event_surveys")
+        .upsert(
+          {
+            survey_token: token,
+            event_id: targetEv.event_id,
+            survey_title: draft.surveyTitle,
+            description: draft.description || "",
+            questions: draft.questions,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "survey_token" }
+        )
+        .select("*")
+        .single();
+
+      if (!upsertErr && upserted?.id) {
+        surveyId = String(upserted.id);
+      }
+    } catch (err) {
+      console.warn("[CampusSync] Supabase event_surveys upsert skipped:", err);
+    }
+
+    // 2. Mirror to backend public survey endpoint (fallback when Supabase migration hasn't run yet)
+    try {
+      const backendPub = await publishAiSurvey({
+        eventId: targetEv.event_id,
+        surveyToken: token,
+        survey: draft,
+        publicBaseUrl: origin,
+        eventMeta: {
+          title: targetEv.title,
+          organization: targetEv.organization,
+          event_date: targetEv.event_date,
+          venue: targetEv.venue,
+        },
+      });
+      if (backendPub?.surveyId && surveyId === token) {
+        surveyId = backendPub.surveyId;
+      }
+      if (backendPub?.surveyUrl) {
+        surveyUrl = backendPub.surveyUrl;
+      }
+    } catch (err) {
+      console.warn("[CampusSync] Backend survey publish mirror skipped:", err);
+    }
+
+    // 3. Mirror published survey into events.description bundle so /survey/:token resolves even pre-migration
+    const decoded = decodeProposalDescription(targetEv.description);
+    const updatedDescription = encodeProposalDescriptionWithAttachments(decoded.cleanDescription, {
+      files: decoded.files,
+      preScreen: decoded.preScreen,
+      aiStatus: decoded.aiStatus,
+      aiUpdatedAt: decoded.aiUpdatedAt,
+      publishedSurvey: {
+        surveyId,
+        surveyToken: token,
+        surveyUrl,
+        draft,
+        publishedAt: new Date().toISOString(),
+      },
+      emailDispatch: decoded.emailDispatch,
+    });
+
+    const { error: extErr } = await supabase
+      .from("events")
+      .update({
+        description: updatedDescription,
+        ai_survey_draft: draft,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("event_id", targetEv.event_id);
+
+    if (extErr) {
+      await supabase
+        .from("events")
+        .update({
+          description: updatedDescription,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("event_id", targetEv.event_id);
+    }
+
+    setEvents((prev) =>
+      prev.map((item) =>
+        item.event_id === targetEv.event_id
+          ? { ...item, description: updatedDescription, ai_survey_draft: draft }
+          : item
+      )
+    );
+
+    const meta: CachedPublishedSurveyMeta = { surveyId, surveyToken: token, surveyUrl };
+    aiLocalCache.saveSurveyDraft(targetEv.event_id, draft);
+    aiLocalCache.savePublishedSurvey(targetEv.event_id, meta);
+    setSavedSurveyDrafts((prev) => ({ ...prev, [String(targetEv.event_id)]: draft }));
+    setPublishedSurveysMap((prev) => ({ ...prev, [String(targetEv.event_id)]: meta }));
+    return meta;
+  };
+
+  const persistDispatchRecordLocallyAndToSupabase = async (
+    targetEv: EventRecord,
+    dispatch: EmailDispatchRecord
+  ) => {
+    aiLocalCache.saveEmailDispatch(targetEv.event_id, dispatch);
+    setDispatchMap((prev) => ({ ...prev, [String(targetEv.event_id)]: dispatch }));
+    setEmailDispatchesList((prev) => {
+      const rest = prev.filter((item) => item.id !== dispatch.id);
+      return [dispatch, ...rest];
+    });
+
+    // Ensure Supabase public.email_dispatches has the latest dispatch record (even when backend lacks service_role key)
+    try {
+      const validUuid = /^[0-9a-f-]{36}$/i.test(dispatch.id);
+      await supabase.from("email_dispatches").upsert(
+        {
+          ...(validUuid ? { id: dispatch.id } : {}),
+          proposal_id: targetEv.event_id,
+          survey_id: dispatch.survey_id,
+          survey_url: dispatch.survey_url,
+          status: dispatch.status,
+          target_groups: dispatch.target_groups,
+          recipient_count: dispatch.recipient_count,
+          email_subject: dispatch.email_subject,
+          email_html_preview: dispatch.email_html_preview,
+          email_text_fallback: dispatch.email_text_fallback,
+          sent_at: dispatch.sent_at,
+          error_message: dispatch.error_message,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+    } catch {
+      // Table may not exist yet; graceful local cache & events bundle fallback applies
+    }
+
+    // Mirror lightweight dispatch status into events.description bundle
+    try {
+      const decoded = decodeProposalDescription(targetEv.description);
+      const updatedDescription = encodeProposalDescriptionWithAttachments(
+        decoded.cleanDescription,
+        {
+          files: decoded.files,
+          preScreen: decoded.preScreen,
+          aiStatus: decoded.aiStatus,
+          aiUpdatedAt: decoded.aiUpdatedAt,
+          publishedSurvey: decoded.publishedSurvey,
+          emailDispatch: {
+            id: dispatch.id,
+            status: dispatch.status,
+            targetGroups: dispatch.target_groups,
+            recipientCount: dispatch.recipient_count,
+            emailSubject: dispatch.email_subject,
+            surveyUrl: dispatch.survey_url,
+            sentAt: dispatch.sent_at,
+            errorMessage: dispatch.error_message,
+          },
+        }
+      );
+      await supabase
+        .from("events")
+        .update({ description: updatedDescription, updated_at: new Date().toISOString() })
+        .eq("event_id", targetEv.event_id);
+      setEvents((prev) =>
+        prev.map((item) =>
+          item.event_id === targetEv.event_id
+            ? { ...item, description: updatedDescription }
+            : item
+        )
+      );
+    } catch {
+      // Non-critical bundle mirror failure
+    }
+  };
+
+  const triggerAutomatedEmailSyndication = async (
+    targetEv: EventRecord,
+    publishedMeta: CachedPublishedSurveyMeta,
+    roles: RecipientRole[] = surveyTargetGroups
+  ) => {
+    const evStatus = normalizedStatus(targetEv.status);
+    if (evStatus !== "approved" && evStatus !== "completed") {
+      return;
+    }
+
+    const effectiveRoles: RecipientRole[] =
+      roles.length > 0 ? roles : ["student", "faculty"];
+    setSyndicatingEventId(targetEv.event_id);
+
+    // Ensure event has a verifiable SHA-256 hash before formatting the official email
+    let clearanceHash = targetEv.clearance_hash || "";
+    if (!clearanceHash) {
+      clearanceHash = await computeSha256Hex(
+        JSON.stringify({
+          event_id: targetEv.event_id,
+          title: targetEv.title,
+          organization: targetEv.organization || "Student Organization",
+          event_date: targetEv.event_date,
+          venue: targetEv.venue,
+          registration_link:
+            targetEv.external_registration_link || targetEv.registration_link || "",
+        })
+      );
+      await supabase
+        .from("events")
+        .update({ clearance_hash: clearanceHash, updated_at: new Date().toISOString() })
+        .eq("event_id", targetEv.event_id);
+    }
+
+    // Gather optional approved poster/PDF attachments for multimodal Gemini email enrichment
+    const decoded = decodeProposalDescription(targetEv.description);
+    const sortedAttachments = [...decoded.files].sort((a, b) => {
+      const aImg = a.mimeType.startsWith("image/") ? 0 : 1;
+      const bImg = b.mimeType.startsWith("image/") ? 0 : 1;
+      return aImg - bImg;
+    });
+    const posterFiles = sortedAttachments
+      .map((att) => carriedAttachmentToFile(att))
+      .filter((f): f is File => Boolean(f))
+      .slice(0, 2);
+    const posterUrls = sortedAttachments
+      .filter((att) => Boolean(att.storageUrl))
+      .map((att) => ({
+        url: att.storageUrl as string,
+        filename: att.name,
+        mimeType: att.mimeType,
+      }))
+      .slice(0, 2);
+
+    const preScreen = getEventPreScreen(targetEv);
+    const draftTitle =
+      activeSurveyDraft?.surveyTitle ||
+      savedSurveyDrafts[String(targetEv.event_id)]?.surveyTitle ||
+      targetEv.ai_survey_draft?.surveyTitle;
+
+    try {
+      const response = await syndicateEventEmail({
+        proposalId: targetEv.event_id,
+        surveyId: publishedMeta.surveyId,
+        surveyToken: publishedMeta.surveyToken,
+        surveyUrl: publishedMeta.surveyUrl,
+        targetRoles: effectiveRoles,
+        posterFiles,
+        posterUrls,
+        fallbackRecipients: mailingRecipients,
+        eventSnapshot: {
+          event_id: targetEv.event_id,
+          title: targetEv.title,
+          organization: targetEv.organization,
+          event_date: targetEv.event_date,
+          start_time: targetEv.start_time,
+          end_time: targetEv.end_time,
+          venue: targetEv.venue,
+          description: decoded.cleanDescription,
+          status: targetEv.status,
+          external_registration_link: targetEv.external_registration_link,
+          registration_link: targetEv.registration_link,
+          clearance_hash: clearanceHash,
+          surveyTitle: draftTitle,
+          highlights: preScreen?.eventSummary?.keyHighlights || [],
+        },
+      });
+
+      if (response.emailProvider) {
+        setEmailProviderStatus(response.emailProvider);
+      }
+
+      if (response.dispatch) {
+        await persistDispatchRecordLocallyAndToSupabase(targetEv, response.dispatch);
+      }
+    } catch (err) {
+      const errMsg =
+        err instanceof Error ? err.message : "Automated institutional email syndication failed.";
+      const failedRecord: EmailDispatchRecord = {
+        id:
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `disp-${Date.now()}`,
+        proposal_id: targetEv.event_id,
+        survey_id: publishedMeta.surveyId,
+        survey_url: publishedMeta.surveyUrl,
+        status: "FAILED",
+        target_groups: effectiveRoles,
+        recipient_count: mailingRecipients.filter(
+          (r) => r.is_active && effectiveRoles.includes(r.role)
+        ).length,
+        email_subject: `[Official Event Announcement] ${targetEv.title}`,
+        email_html_preview: null,
+        email_text_fallback: null,
+        sent_at: null,
+        error_message: errMsg,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await persistDispatchRecordLocallyAndToSupabase(targetEv, failedRecord);
+    } finally {
+      setSyndicatingEventId(null);
+    }
+  };
+
+  const handleRetryEmailDispatch = async (targetEv: EventRecord, existingDispatch?: EmailDispatchRecord | null) => {
+    const published = getEventPublishedSurvey(targetEv);
+    const surveyUrl = existingDispatch?.survey_url || published?.surveyUrl;
+    if (!surveyUrl) {
+      setActiveNav("surveys");
+      setSurveyTargetEventId(targetEv.event_id);
+      return;
+    }
+    const meta: CachedPublishedSurveyMeta = {
+      surveyId: existingDispatch?.survey_id || published?.surveyId || `srv_${targetEv.event_id}`,
+      surveyToken: published?.surveyToken || `srv_${targetEv.event_id}`,
+      surveyUrl,
+    };
+    const roles =
+      existingDispatch?.target_groups && existingDispatch.target_groups.length > 0
+        ? existingDispatch.target_groups
+        : surveyTargetGroups;
+    await triggerAutomatedEmailSyndication(targetEv, meta, roles);
+  };
+
+  // ── AI Handler 3: Generate Post-Event Survey with AI (+ Automatic Institutional Email Syndication) ──
   const handleGenerateSurveyWithAi = async () => {
     const targetEv =
       events.find((e) => e.event_id === surveyTargetEventId) ||
@@ -981,6 +1605,31 @@ export function CoordinatorInterface({
         objectives,
       });
       setActiveSurveyDraft(result);
+
+      if (targetEv) {
+        const existingPub = getEventPublishedSurvey(targetEv);
+        const publishedMeta = await publishSurveyForEvent(
+          targetEv,
+          result,
+          existingPub?.surveyToken
+        );
+
+        const isApproved =
+          normalizedStatus(targetEv.status) === "approved" ||
+          normalizedStatus(targetEv.status) === "completed";
+
+        if (isApproved) {
+          setSurveySaveMessage(
+            "Survey finalized & published. Automatically formatting and dispatching institutional announcement email..."
+          );
+          // Immediately trigger automated institutional email syndication after survey finalization
+          void triggerAutomatedEmailSyndication(targetEv, publishedMeta, surveyTargetGroups);
+        } else {
+          setSurveySaveMessage(
+            "Survey finalized & saved. Approve this event to trigger automatic institutional email syndication."
+          );
+        }
+      }
     } catch (err) {
       setSurveyGenError(err instanceof Error ? err.message : "Failed to generate survey with AI.");
     } finally {
@@ -994,15 +1643,35 @@ export function CoordinatorInterface({
       events.find((e) => e.event_id === surveyTargetEventId) ||
       approvedEvents[0] ||
       events[0];
-    const key = targetEv ? String(targetEv.event_id) : "custom-draft";
-    aiLocalCache.saveSurveyDraft(key, activeSurveyDraft);
-    setSavedSurveyDrafts((prev) => ({ ...prev, [key]: activeSurveyDraft }));
-    if (targetEv) {
-      await persistOptionalEventColumns(targetEv.event_id, {
-        ai_survey_draft: activeSurveyDraft,
-      });
+    if (!targetEv) {
+      aiLocalCache.saveSurveyDraft("custom-draft", activeSurveyDraft);
+      setSavedSurveyDrafts((prev) => ({ ...prev, "custom-draft": activeSurveyDraft }));
+      setSurveySaveMessage("Survey saved.");
+      return;
     }
-    setSurveySaveMessage("Survey saved and ready for deployment.");
+
+    const existingPub = getEventPublishedSurvey(targetEv);
+    const publishedMeta = await publishSurveyForEvent(
+      targetEv,
+      activeSurveyDraft,
+      existingPub?.surveyToken
+    );
+
+    const existingDispatch = getEventDispatch(targetEv);
+    const isApproved =
+      normalizedStatus(targetEv.status) === "approved" ||
+      normalizedStatus(targetEv.status) === "completed";
+
+    if (isApproved && existingDispatch?.status !== "SENT") {
+      setSurveySaveMessage(
+        "Survey saved & published. Automatically triggering institutional email syndication..."
+      );
+      void triggerAutomatedEmailSyndication(targetEv, publishedMeta, surveyTargetGroups);
+    } else {
+      setSurveySaveMessage(
+        "Survey updates saved live — the existing public survey link now serves your updated questions."
+      );
+    }
   };
 
   const updateDraftQuestion = (
@@ -1053,17 +1722,25 @@ export function CoordinatorInterface({
   };
 
   // ── AI Handler 4: Post-Event Feedback Sentiment & Diagnostics ──
-  const getResponsesForEvent = (ev: EventRecord): SurveyResponseEntry[] =>
-    feedbackResponsesByEvent[ev.event_id] || getDefaultSurveyResponses(ev.title);
+  const hasLiveResponsesForEvent = (ev: EventRecord): boolean =>
+    (liveResponsesByEvent[ev.event_id]?.length || 0) > 0;
+
+  const getResponsesForEvent = (ev: EventRecord): SurveyResponseEntry[] => {
+    const live = liveResponsesByEvent[ev.event_id] || [];
+    const manual = feedbackResponsesByEvent[ev.event_id] || [];
+    if (live.length > 0 || manual.length > 0) {
+      return [...manual, ...live];
+    }
+    return getDefaultSurveyResponses(ev.title);
+  };
 
   const handleAddFeedbackResponse = (ev: EventRecord) => {
     if (!newFeedbackComment.trim()) return;
-    const current = getResponsesForEvent(ev);
     setFeedbackResponsesByEvent((prev) => ({
       ...prev,
       [ev.event_id]: [
         { rating: newFeedbackRating, comment: newFeedbackComment.trim() },
-        ...current,
+        ...(prev[ev.event_id] || []),
       ],
     }));
     setNewFeedbackComment("");
@@ -1102,6 +1779,78 @@ export function CoordinatorInterface({
     }
   };
 
+  // ── Mailing List CRUD Handlers (Supabase primary, backend /api/email/recipients fallback) ──
+  const handleAddMailingRecipient = async (input: {
+    full_name: string;
+    email: string;
+    role: RecipientRole;
+    department: string;
+  }) => {
+    const payload = {
+      full_name: input.full_name,
+      email: input.email.trim().toLowerCase(),
+      role: input.role,
+      department: input.department || "General",
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("institutional_recipients")
+      .upsert(payload, { onConflict: "email" })
+      .select("*")
+      .single();
+
+    if (!error && data) {
+      const rec = data as InstitutionalRecipientRecord;
+      setMailingRecipients((prev) => [rec, ...prev.filter((item) => item.id !== rec.id)]);
+      return;
+    }
+
+    const rec = await createBackendEmailRecipient(input);
+    setMailingRecipients((prev) => [rec, ...prev.filter((item) => item.id !== rec.id)]);
+  };
+
+  const handleToggleMailingRecipient = async (recipient: InstitutionalRecipientRecord) => {
+    const nextActive = !recipient.is_active;
+    const { data, error } = await supabase
+      .from("institutional_recipients")
+      .update({ is_active: nextActive, updated_at: new Date().toISOString() })
+      .eq("id", recipient.id)
+      .select("*")
+      .single();
+
+    if (!error && data) {
+      setMailingRecipients((prev) =>
+        prev.map((r) => (r.id === recipient.id ? (data as InstitutionalRecipientRecord) : r))
+      );
+      return;
+    }
+
+    try {
+      const updated = await updateBackendEmailRecipient(recipient.id, { is_active: nextActive });
+      setMailingRecipients((prev) =>
+        prev.map((r) => (r.id === recipient.id ? updated : r))
+      );
+    } catch {
+      setMailingRecipients((prev) =>
+        prev.map((r) => (r.id === recipient.id ? { ...r, is_active: nextActive } : r))
+      );
+    }
+  };
+
+  const handleDeleteMailingRecipient = async (id: string) => {
+    const { error } = await supabase.from("institutional_recipients").delete().eq("id", id);
+    if (error) {
+      try {
+        await deleteBackendEmailRecipient(id);
+      } catch {
+        // Ignore backend fallback delete error
+      }
+    }
+    setMailingRecipients((prev) => prev.filter((r) => r.id !== id));
+  };
+
   const handleUpdateStatus = async (
     status: "approved" | "rejected" | "revision",
     feedback?: string
@@ -1111,14 +1860,37 @@ export function CoordinatorInterface({
 
     const dbStatus = status === "revision" ? "needs_revision" : status;
     const targetId = selectedEvent.event_id;
+    const nowIso = new Date().toISOString();
+
+    let clearanceHash = selectedEvent.clearance_hash || null;
+    if (status === "approved") {
+      clearanceHash = await computeSha256Hex(
+        JSON.stringify({
+          event_id: targetId,
+          title: selectedEvent.title,
+          organization: selectedEvent.organization || "Student Organization",
+          event_date: selectedEvent.event_date,
+          start_time: selectedEvent.start_time,
+          end_time: selectedEvent.end_time,
+          venue: selectedEvent.venue,
+          registration_link:
+            selectedEvent.external_registration_link || selectedEvent.registration_link || "",
+          coordinatorEmail,
+          approvedAt: nowIso,
+        })
+      );
+    }
+
+    const updatePayload: Record<string, unknown> = {
+      status: dbStatus,
+      admin_feedback: feedback || null,
+      updated_at: nowIso,
+      ...(status === "approved" && clearanceHash ? { clearance_hash: clearanceHash } : {}),
+    };
 
     const { error } = await supabase
       .from("events")
-      .update({
-        status: dbStatus,
-        admin_feedback: feedback || null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("event_id", targetId);
 
     if (error) {
@@ -1135,10 +1907,14 @@ export function CoordinatorInterface({
                 ...ev,
                 status: dbStatus as EventRecord["status"],
                 admin_feedback: feedback || ev.admin_feedback,
+                ...(status === "approved" && clearanceHash ? { clearance_hash: clearanceHash } : {}),
               }
             : ev
         )
       );
+      if (status === "approved") {
+        setSurveyTargetEventId(targetId);
+      }
       if (reviewFilter === "PENDING") {
         setSelectedEventId(null);
       }
@@ -1301,6 +2077,29 @@ export function CoordinatorInterface({
 
               <button
                 type="button"
+                title="Institutional Mailing List"
+                onClick={() => setActiveNav("mailing")}
+                className={`w-full px-3 py-2.5 mt-0.5 rounded-md text-xs flex items-center ${
+                  isSidebarCollapsed ? "justify-center relative" : "justify-between"
+                } transition-colors cursor-pointer ${
+                  activeNav === "mailing"
+                    ? "bg-white/15 text-white font-semibold shadow-[inset_3px_0_0_#F2B84B]"
+                    : "text-[#D5DCF0] hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <span className="flex items-center gap-3">
+                  <Mail className="size-4 text-[#F2B84B] shrink-0" />
+                  {!isSidebarCollapsed && <span>Mailing List</span>}
+                </span>
+                {!isSidebarCollapsed && mailingRecipients.filter((r) => r.is_active).length > 0 && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded-full font-bold bg-white/15 text-[#F2B84B]">
+                    {mailingRecipients.filter((r) => r.is_active).length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 title="Account Management"
                 onClick={() => setActiveNav("accounts")}
                 className={`w-full px-3 py-2.5 mt-0.5 rounded-md text-xs flex items-center ${
@@ -1354,6 +2153,7 @@ export function CoordinatorInterface({
               fetchQueue();
               fetchFacilitatorAccounts();
               fetchAnnouncements();
+              void fetchSyndicationData();
             }}
             className="px-3 py-1.5 rounded-md bg-white hover:bg-[#F2F4F7] text-[#18212F] border border-[#C9D0DB] font-medium flex items-center gap-1.5 cursor-pointer transition"
           >
@@ -2183,24 +2983,53 @@ export function CoordinatorInterface({
                   )}
                 </div>
 
-                {/* Cryptographic Non-Repudiation Ledger (UC-03 / RA 8792) */}
-                {normalizedStatus(selectedEvent.status) === "approved" && (
-                  <div className="mx-6 mb-4 p-4 rounded-lg bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[#1F7A4D] font-bold text-[11px] flex items-center gap-1.5">
-                        <ShieldCheck className="size-3.5" /> Tamper-Evident Institutional Clearance Ledger
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
-                        RA 8792 Compliant
-                      </span>
+                {/* Cryptographic Non-Repudiation Ledger (UC-03 / RA 8792) + Email Syndication Status */}
+                {(normalizedStatus(selectedEvent.status) === "approved" ||
+                  normalizedStatus(selectedEvent.status) === "completed") && (
+                  <div className="mx-6 mb-4 space-y-3">
+                    <div className="p-4 rounded-lg bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#1F7A4D] font-bold text-[11px] flex items-center gap-1.5">
+                          <ShieldCheck className="size-3.5" /> Tamper-Evident Institutional Clearance Ledger
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
+                          RA 8792 Compliant
+                        </span>
+                      </div>
+                      <div className="font-mono text-[10px] text-[#18212F] break-all bg-white/80 p-2.5 rounded border border-[#B6DFC8]">
+                        SHA-256: {selectedEvent.clearance_hash || "Computed automatically on institutional dispatch"}
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-[#5B6678] pt-0.5">
+                        <span>Cleared by: Institutional Coordinator Authority</span>
+                        <span className="text-[#1F7A4D] font-semibold">
+                          {getEventDispatch(selectedEvent)?.status === "SENT"
+                            ? "✓ Syndicated to Institutional Emails"
+                            : "✓ Cleared — Ready for Survey & Email Syndication"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="font-mono text-[10px] text-[#18212F] break-all bg-white/80 p-2.5 rounded border border-[#B6DFC8]">
-                      SHA-256: {selectedEvent.clearance_hash || "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"}
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] text-[#5B6678] pt-0.5">
-                      <span>Cleared by: Institutional Coordinator Authority</span>
-                      <span className="text-[#1F7A4D] font-semibold">✓ Syndicated to Events Mobile App</span>
-                    </div>
+
+                    <EmailSyndicationStatusCard
+                      dispatch={getEventDispatch(selectedEvent)}
+                      surveyUrl={getEventPublishedSurvey(selectedEvent)?.surveyUrl}
+                      isSending={syndicatingEventId === selectedEvent.event_id}
+                      onPreview={(d) => setPreviewDispatch(d)}
+                      onRetry={() =>
+                        void handleRetryEmailDispatch(
+                          selectedEvent,
+                          getEventDispatch(selectedEvent)
+                        )
+                      }
+                      onOpenSurveyTab={() => {
+                        setSurveyTargetEventId(selectedEvent.event_id);
+                        setSurveyObjectives(decodeProposalDescription(selectedEvent.description).cleanDescription);
+                        const existingDraft =
+                          selectedEvent.ai_survey_draft ||
+                          savedSurveyDrafts[String(selectedEvent.event_id)];
+                        setActiveSurveyDraft(existingDraft || null);
+                        setActiveNav("surveys");
+                      }}
+                    />
                   </div>
                 )}
 
@@ -2410,22 +3239,72 @@ export function CoordinatorInterface({
                 />
               </div>
 
+              {/* Institutional Email Syndication Target Audience (auto-dispatched once survey finalizes for approved events) */}
+              <div className="p-3.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="text-[11px] font-bold text-[#18212F] flex items-center gap-1.5">
+                    <Mail className="size-3.5 text-[#24408E]" /> Automatic Institutional Email Syndication Audience
+                  </div>
+                  <p className="text-[11px] text-[#5B6678]">
+                    For approved events, finalizing this survey automatically formats and BCC-dispatches the announcement email with Registration + Survey links.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {(["student", "faculty", "staff"] as const).map((role) => {
+                    const checked = surveyTargetGroups.includes(role);
+                    const count = mailingRecipients.filter((r) => r.is_active && r.role === role).length;
+                    return (
+                      <label
+                        key={role}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-semibold capitalize cursor-pointer transition ${
+                          checked
+                            ? "bg-[#EAEFFA] border-[#24408E] text-[#24408E]"
+                            : "bg-white border-[#C9D0DB] text-[#5B6678]"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setSurveyTargetGroups((prev) => {
+                              if (e.target.checked) return Array.from(new Set([...prev, role]));
+                              const next = prev.filter((item) => item !== role);
+                              return next.length > 0 ? next : prev;
+                            });
+                          }}
+                          className="accent-[#24408E]"
+                        />
+                        {role === "student" ? "Students" : role === "faculty" ? "Faculty" : "Staff"} ({count})
+                      </label>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setActiveNav("mailing")}
+                    className="text-[11px] font-semibold text-[#24408E] hover:underline cursor-pointer"
+                  >
+                    Manage Mailing List →
+                  </button>
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={handleGenerateSurveyWithAi}
-                  disabled={generatingSurvey}
+                  disabled={generatingSurvey || syndicatingEventId !== null}
                   className="px-5 py-2.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
                 >
                   {generatingSurvey ? (
                     <>
                       <Loader2 className="size-3.5 animate-spin" />
-                      Generating Questions...
+                      Generating Survey...
                     </>
                   ) : (
                     <>
                       <Sparkles className="size-3.5" />
-                      Generate Survey with AI
+                      Generate Survey &amp; Auto-Push Email
                     </>
                   )}
                 </button>
@@ -2438,6 +3317,30 @@ export function CoordinatorInterface({
                   <Plus className="size-3.5 text-[#24408E]" /> Add Custom Question
                 </button>
               </div>
+
+              {/* Live Automated Email Syndication Status for Selected Approved Target Event */}
+              {(() => {
+                const targetEv =
+                  events.find((e) => e.event_id === surveyTargetEventId) ||
+                  approvedEvents[0] ||
+                  null;
+                if (!targetEv) return null;
+                const isApproved =
+                  normalizedStatus(targetEv.status) === "approved" ||
+                  normalizedStatus(targetEv.status) === "completed";
+                if (!isApproved) return null;
+                return (
+                  <EmailSyndicationStatusCard
+                    dispatch={getEventDispatch(targetEv)}
+                    surveyUrl={getEventPublishedSurvey(targetEv)?.surveyUrl}
+                    isSending={syndicatingEventId === targetEv.event_id}
+                    onPreview={(d) => setPreviewDispatch(d)}
+                    onRetry={() =>
+                      void handleRetryEmailDispatch(targetEv, getEventDispatch(targetEv))
+                    }
+                  />
+                );
+              })()}
 
               {surveyGenError && (
                 <div className="p-3 rounded-md bg-[#FBEDEC] border border-[#E2B3AF] text-xs text-[#B3261E] flex items-start gap-2">
@@ -2604,6 +3507,7 @@ export function CoordinatorInterface({
                     : events.filter((e) => normalizedStatus(e.status) !== "rejected")
                   ).map((ev) => {
                     const responses = getResponsesForEvent(ev);
+                    const isLiveResponses = hasLiveResponsesForEvent(ev);
                     const rated = responses.filter((r) => typeof r.rating === "number");
                     const avgRating =
                       rated.length > 0
@@ -2612,6 +3516,11 @@ export function CoordinatorInterface({
                     const analysis =
                       ev.ai_feedback_analysis || feedbackAnalysisMap[String(ev.event_id)];
                     const savedDraft = ev.ai_survey_draft || savedSurveyDrafts[String(ev.event_id)];
+                    const evDispatch = getEventDispatch(ev);
+                    const evPublishedSurvey = getEventPublishedSurvey(ev);
+                    const isEvApproved =
+                      normalizedStatus(ev.status) === "approved" ||
+                      normalizedStatus(ev.status) === "completed";
                     const isExpanded = expandedFeedbackEventId === ev.event_id;
                     const isAnalyzing = analyzingEventId === ev.event_id;
 
@@ -2622,11 +3531,16 @@ export function CoordinatorInterface({
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <h3 className="text-sm font-bold text-[#18212F]">{ev.title}</h3>
                               {savedDraft && (
                                 <span className="px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
-                                  {savedDraft.questions.length} AI Questions Saved
+                                  {savedDraft.questions.length} AI Questions Published
+                                </span>
+                              )}
+                              {isLiveResponses && (
+                                <span className="px-2 py-0.5 rounded bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] text-[10px] font-semibold">
+                                  ● Live Public Responses
                                 </span>
                               )}
                             </div>
@@ -2666,9 +3580,22 @@ export function CoordinatorInterface({
                           </div>
                         </div>
 
+                        {isEvApproved && (
+                          <EmailSyndicationStatusCard
+                            compact
+                            dispatch={evDispatch}
+                            surveyUrl={evPublishedSurvey?.surveyUrl}
+                            isSending={syndicatingEventId === ev.event_id}
+                            onPreview={(d) => setPreviewDispatch(d)}
+                            onRetry={() => void handleRetryEmailDispatch(ev, evDispatch)}
+                          />
+                        )}
+
                         <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-[#DDE2EA] text-center">
                           <div className="p-2.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA]">
-                            <div className="text-[10px] text-[#5B6678]">Collected Responses</div>
+                            <div className="text-[10px] text-[#5B6678]">
+                              {isLiveResponses ? "Live Responses" : "Sample Responses"}
+                            </div>
                             <div className="text-sm font-bold text-[#18212F]">{responses.length}</div>
                           </div>
                           <div className="p-2.5 rounded-md bg-[#F7F8FA] border border-[#DDE2EA]">
@@ -2817,7 +3744,30 @@ export function CoordinatorInterface({
           </div>
         )}
 
-        {/* ── TAB 4: ACCOUNT MANAGEMENT (CONNECTED TO FACILITATOR PORTAL USERS) ── */}
+        {/* ── TAB 4: INSTITUTIONAL MAILING LIST & SYNDICATION DIRECTORY ── */}
+        {activeNav === "mailing" && (
+          <InstitutionalMailingListView
+            recipients={mailingRecipients}
+            dispatches={emailDispatchesList}
+            emailProvider={emailProviderStatus}
+            eventTitleMap={Object.fromEntries(events.map((e) => [e.event_id, e.title]))}
+            loading={mailingLoading}
+            retryingProposalId={syndicatingEventId}
+            onAddRecipient={handleAddMailingRecipient}
+            onToggleRecipient={handleToggleMailingRecipient}
+            onDeleteRecipient={handleDeleteMailingRecipient}
+            onRefresh={fetchSyndicationData}
+            onPreviewDispatch={(d) => setPreviewDispatch(d)}
+            onRetryDispatch={async (d) => {
+              const foundEv = events.find((e) => e.event_id === d.proposal_id);
+              if (foundEv) {
+                await handleRetryEmailDispatch(foundEv, d);
+              }
+            }}
+          />
+        )}
+
+        {/* ── TAB 5: ACCOUNT MANAGEMENT (CONNECTED TO FACILITATOR PORTAL USERS) ── */}
         {activeNav === "accounts" && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#DDE2EA] pb-4 text-left">
@@ -2918,6 +3868,27 @@ export function CoordinatorInterface({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Preview Dispatched Email Modal */}
+      {previewDispatch && (
+        <EmailPreviewModal
+          dispatch={previewDispatch}
+          eventTitle={events.find((e) => e.event_id === previewDispatch.proposal_id)?.title}
+          onClose={() => setPreviewDispatch(null)}
+          retrying={syndicatingEventId === previewDispatch.proposal_id}
+          onRetry={
+            previewDispatch.status === "FAILED"
+              ? () => {
+                  const foundEv = events.find((e) => e.event_id === previewDispatch.proposal_id);
+                  if (foundEv) {
+                    setPreviewDispatch(null);
+                    void handleRetryEmailDispatch(foundEv, previewDispatch);
+                  }
+                }
+              : undefined
+          }
+        />
       )}
     </div>
   );

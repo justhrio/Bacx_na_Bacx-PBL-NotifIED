@@ -366,3 +366,36 @@ export const surveyDiagnosticsResponseSchema: Schema = {
     "executiveSummary",
   ],
 };
+
+// ============================================================================
+// 5. Multimodal Institutional Event Email Digest Synthesizer
+// ============================================================================
+
+export interface FormattedEventEmailDigest {
+  emailSubject: string;
+  htmlBody: string;
+  plainTextFallback: string;
+}
+
+export const emailDigestResponseSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    emailSubject: {
+      type: Type.STRING,
+      description:
+        "Concise, clear, formal institutional email subject line announcing the approved campus event (under 110 characters, e.g. '[Official Event Announcement] Annual Tech Symposium — Dec 10, 2026').",
+    },
+    htmlBody: {
+      type: Type.STRING,
+      description:
+        "Complete, self-contained, mobile-friendly HTML email body using inline CSS only (no external stylesheets, no scripts). Must feature clean institutional navy (#1C2D63 / #24408E) and white styling, full approved event details (title, organizer, date, schedule/time, venue, summary/highlights), a prominent Registration CTA button + raw fallback URL (if a registration link was provided), a prominent Post-Event Evaluation Survey CTA button + raw fallback URL, and an Institutional Authenticity Footer showing the official approval status and exact SHA-256 verification hash.",
+    },
+    plainTextFallback: {
+      type: Type.STRING,
+      description:
+        "Clean plain-text version of the institutional event announcement containing all approved event details, the exact Registration URL (if provided), the exact Post-Event Survey URL, and the official approval status with the exact SHA-256 Verification Hash.",
+    },
+  },
+  required: ["emailSubject", "htmlBody", "plainTextFallback"],
+};
+

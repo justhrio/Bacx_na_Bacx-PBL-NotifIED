@@ -5,6 +5,8 @@ import { getSupabaseAdmin } from "../config/supabase.js";
 import {
   type BatchTriageItem,
   batchTriageResponseSchema,
+  emailDigestResponseSchema,
+  type FormattedEventEmailDigest,
   type GeneratedSurveyResult,
   type PreScreenResult,
   preScreenResponseSchema,
@@ -589,3 +591,237 @@ Analysis Instructions:
     executiveSummary: parsed.executiveSummary || "",
   };
 }
+
+// ============================================================================
+// 5. Multimodal Institutional Event Email Digest Synthesizer
+// ============================================================================
+
+export interface ApprovedEventEmailData {
+  eventId?: number;
+  title: string;
+  organization?: string;
+  eventDate?: string;
+  startTime?: string;
+  endTime?: string;
+  venue?: string;
+  description?: string;
+  registrationLink?: string | null;
+  clearanceHash?: string | null;
+  surveyTitle?: string;
+  highlights?: string[];
+  approvedBy?: string;
+}
+
+function stripAttachmentMarker(raw?: string | null): string {
+  if (!raw) return "";
+  const markerIdx = raw.indexOf("<!--CAMPUSSYNC_ATTACHMENTS:");
+  return (markerIdx === -1 ? raw : raw.slice(0, markerIdx)).trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeEmailHtml(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+}
+
+function ensureRequiredEmailElements(
+  digest: FormattedEventEmailDigest,
+  eventData: ApprovedEventEmailData,
+  surveyUrl: string,
+  clearanceHash: string
+): FormattedEventEmailDigest {
+  let htmlBody = sanitizeEmailHtml((digest.htmlBody || "").trim());
+  let plainTextFallback = (digest.plainTextFallback || "").trim();
+  const regLink = (eventData.registrationLink || "").trim();
+
+  const missingHtmlBlocks: string[] = [];
+
+  if (regLink && !htmlBody.includes(regLink)) {
+    const safeReg = escapeHtml(regLink);
+    missingHtmlBlocks.push(
+      `<div style="margin:16px 0;padding:16px;background-color:#EAEFFA;border:1px solid #C5D3F3;border-radius:8px;">
+        <p style="margin:0 0 10px 0;font-size:13px;font-weight:700;color:#1C2D63;">Event Registration</p>
+        <a href="${safeReg}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 20px;background-color:#24408E;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:13px;border-radius:6px;">Register for This Event</a>
+        <p style="margin:10px 0 0 0;font-size:12px;color:#4B5563;word-break:break-all;">Direct link: <a href="${safeReg}" style="color:#24408E;">${safeReg}</a></p>
+      </div>`
+    );
+  }
+
+  if (surveyUrl && !htmlBody.includes(surveyUrl)) {
+    const safeSurvey = escapeHtml(surveyUrl);
+    missingHtmlBlocks.push(
+      `<div style="margin:16px 0;padding:16px;background-color:#F7F8FA;border:1px solid #DDE2EA;border-radius:8px;">
+        <p style="margin:0 0 8px 0;font-size:13px;font-weight:700;color:#1C2D63;">Post-Event Evaluation Survey (No Login Required)</p>
+        <p style="margin:0 0 12px 0;font-size:12px;color:#4B5563;">Share your feedback immediately after attending this event:</p>
+        <a href="${safeSurvey}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 20px;background-color:#1F7A4D;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:13px;border-radius:6px;">Complete Post-Event Survey</a>
+        <p style="margin:10px 0 0 0;font-size:12px;color:#4B5563;word-break:break-all;">Direct survey link: <a href="${safeSurvey}" style="color:#24408E;">${safeSurvey}</a></p>
+      </div>`
+    );
+  }
+
+  if (clearanceHash && !htmlBody.includes(clearanceHash)) {
+    const safeHash = escapeHtml(clearanceHash);
+    missingHtmlBlocks.push(
+      `<div style="margin:20px 0 0 0;padding:14px 16px;background-color:#E6F3EC;border:1px solid #B6DFC8;border-radius:8px;font-family:Arial,Helvetica,sans-serif;">
+        <p style="margin:0 0 6px 0;font-size:12px;font-weight:700;color:#1F7A4D;">Official Institutional Approval &amp; Authenticity Seal (RA 8792 Compliant)</p>
+        <p style="margin:0;font-size:11px;color:#18212F;font-family:Consolas,Monaco,monospace;word-break:break-all;">SHA-256 Verification Hash: ${safeHash}</p>
+      </div>`
+    );
+  }
+
+  if (missingHtmlBlocks.length > 0) {
+    const addon = `<div style="max-width:640px;margin:12px auto 0 auto;font-family:Arial,Helvetica,sans-serif;">${missingHtmlBlocks.join("")}</div>`;
+    if (/<\/body>/i.test(htmlBody)) {
+      htmlBody = htmlBody.replace(/<\/body>/i, `${addon}</body>`);
+    } else {
+      htmlBody = `${htmlBody}\n${addon}`;
+    }
+  }
+
+  const missingTextLines: string[] = [];
+  if (regLink && !plainTextFallback.includes(regLink)) {
+    missingTextLines.push(`Registration Link: ${regLink}`);
+  }
+  if (surveyUrl && !plainTextFallback.includes(surveyUrl)) {
+    missingTextLines.push(`Post-Event Evaluation Survey (No Login Required): ${surveyUrl}`);
+  }
+  if (clearanceHash && !plainTextFallback.includes(clearanceHash)) {
+    missingTextLines.push(
+      `Official Institutional Status: Approved & Cleared by Student Activities Office (RA 8792)\nSHA-256 Verification Hash: ${clearanceHash}`
+    );
+  }
+  if (missingTextLines.length > 0) {
+    plainTextFallback = `${plainTextFallback}\n\n---\n${missingTextLines.join("\n\n")}`.trim();
+  }
+
+  return {
+    emailSubject:
+      (digest.emailSubject || "").trim() ||
+      `[Official Event Announcement] ${eventData.title}${eventData.eventDate ? ` — ${eventData.eventDate}` : ""}`,
+    htmlBody,
+    plainTextFallback,
+  };
+}
+
+export async function formatApprovedEventEmailDigest(
+  eventData: ApprovedEventEmailData,
+  surveyUrl: string,
+  posterAttachment?: DocumentInput | DocumentInput[]
+): Promise<FormattedEventEmailDigest & { modelUsed?: string }> {
+  const attachments: DocumentInput[] = posterAttachment
+    ? Array.isArray(posterAttachment)
+      ? posterAttachment
+      : [posterAttachment]
+    : [];
+
+  const fileParts: Part[] = [];
+  for (const doc of attachments) {
+    try {
+      const mimeType = normalizeMimeType(doc.mimeType, doc.filename);
+      fileParts.push({
+        inlineData: {
+          mimeType,
+          data: doc.buffer.toString("base64"),
+        },
+      });
+    } catch {
+      // Skip unsupported auxiliary attachment types gracefully
+    }
+  }
+
+  const cleanDescription = stripAttachmentMarker(eventData.description);
+  const registrationLink = (eventData.registrationLink || "").trim() || null;
+  const clearanceHash =
+    (eventData.clearanceHash || "").trim() ||
+    "PENDING-VERIFICATION-HASH";
+
+  const scheduleText = [eventData.startTime, eventData.endTime]
+    .filter(Boolean)
+    .join(" – ");
+
+  const structuredPayload = {
+    title: eventData.title,
+    organization: eventData.organization || "Student Organization",
+    eventDate: eventData.eventDate || "TBA",
+    schedule: scheduleText || "TBA",
+    venue: eventData.venue || "Campus Venue",
+    summaryAndDescription: cleanDescription || "Official approved campus event.",
+    keyHighlights: eventData.highlights || [],
+    registrationLink,
+    postEventSurveyUrl: surveyUrl,
+    surveyTitle: eventData.surveyTitle || `${eventData.title} — Post-Event Evaluation`,
+    approvalStatus: "Officially Approved & Cleared by Institutional Coordinator Authority",
+    sha256VerificationHash: clearanceHash,
+    attachedPromotionalAssets: attachments.map((a) => ({
+      filename: a.filename,
+      mimeType: a.mimeType,
+    })),
+  };
+
+  const promptText = `You are CampusSync's Institutional Communications & Multimodal Email Synthesizer for Asia Pacific College.
+Compose an official, polished, mobile-friendly institutional announcement email for students and faculty announcing the approved event below.
+${
+  fileParts.length > 0
+    ? "Attached is the approved event's promotional poster / proposal document via multimodal inlineData. Extract relevant highlights, speaker details, agenda points, or key takeaways from the attached document(s) to enrich the announcement without contradicting the approved metadata."
+    : ""
+}
+
+Approved Event & Survey Metadata:
+${JSON.stringify(structuredPayload, null, 2)}
+
+Strict Requirements:
+1. Visual Design (htmlBody):
+   - Use clean, email-client-safe HTML with INLINE CSS ONLY (no <style> blocks, no external fonts/CSS, no <script> tags).
+   - Outer background #F2F4F7, centered white card container (max-width: 640px, border: 1px solid #DDE2EA, border-radius: 8px).
+   - Institutional Navy/Blue header banner (#1C2D63 with gold accent #F2B84B badge "OFFICIAL APPROVED EVENT ANNOUNCEMENT").
+   - Clean typography (Arial, Helvetica, sans-serif), high readability on mobile and desktop.
+2. Full Approved Event Details:
+   - Event Title, Organizing Body, Date, Exact Schedule/Time, Venue, Full Event Summary/Description, and crisp bullet highlights (incorporating any relevant details extracted from attached poster/PDF files).
+3. Registration Link Section:
+   - ${
+     registrationLink
+       ? `MANDATORY: Include a prominent blue CTA button (#24408E, white text) linking to the EXACT URL "${registrationLink}" AND display the raw clickable fallback URL right below the button.`
+       : "No registration link was provided — omit the registration CTA section cleanly without placeholders."
+   }
+4. Post-Event Evaluation Survey Section:
+   - MANDATORY: Include a prominent green/teal CTA button (#1F7A4D, white text) linking to the EXACT URL "${surveyUrl}" AND display the raw clickable fallback URL right below it. Explicitly note that attendees can submit feedback directly after the event with NO system login required.
+5. Institutional Authenticity Footer:
+   - MANDATORY: Include an official authenticity verification box confirming the event is Officially Approved & Cleared (RA 8792 Compliant) and display the EXACT SHA-256 Verification Hash verbatim: "${clearanceHash}".
+6. Plain-Text Fallback (plainTextFallback):
+   - Provide a clean, well-formatted plain-text equivalent containing every detail above, the exact Registration URL (if provided), the exact Post-Event Survey URL, and the exact SHA-256 Verification Hash.
+7. Never alter, shorten, or replace any URL or the SHA-256 hash.`;
+
+  const { response, modelUsed } = await generateContentWithModelFallback({
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: promptText }, ...fileParts],
+      },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: emailDigestResponseSchema,
+    },
+  });
+
+  const parsed = parseJsonResponse<FormattedEventEmailDigest>(
+    response.text,
+    "institutional event email synthesis"
+  );
+
+  const verified = ensureRequiredEmailElements(parsed, eventData, surveyUrl, clearanceHash);
+  return {
+    ...verified,
+    modelUsed,
+  };
+}
+

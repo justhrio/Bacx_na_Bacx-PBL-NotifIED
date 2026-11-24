@@ -32,7 +32,32 @@ export const env = {
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
   ].filter((m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx),
-  supabaseUrl: process.env.SUPABASE_URL || "",
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+  supabaseUrl: (process.env.SUPABASE_URL || "https://zloybmlteeihnvpabuuy.supabase.co").trim(),
+  supabaseServiceRoleKey: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim(),
+  supabaseAnonKey: (process.env.SUPABASE_ANON_KEY || "").trim(),
   supabaseStorageBucket: process.env.SUPABASE_STORAGE_BUCKET || "proposal-documents",
+  publicSurveyBaseUrl: (
+    process.env.PUBLIC_SURVEY_BASE_URL || "https://adminview-eight.vercel.app"
+  )
+    .trim()
+    .replace(/\/$/, ""),
+  smtp: {
+    host: (process.env.SMTP_HOST || "").trim(),
+    port: Number(process.env.SMTP_PORT || 587),
+    secure:
+      process.env.SMTP_SECURE !== undefined
+        ? process.env.SMTP_SECURE.toLowerCase() === "true"
+        : Number(process.env.SMTP_PORT || 587) === 465,
+    user: (process.env.SMTP_USER || "").trim(),
+    pass: (process.env.SMTP_PASS || "").trim(),
+    from: (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim(),
+  },
+  resend: {
+    apiKey: (process.env.RESEND_API_KEY || "").trim(),
+    from: (
+      process.env.RESEND_FROM ||
+      process.env.SMTP_FROM ||
+      "CampusSync Institutional Events <onboarding@resend.dev>"
+    ).trim(),
+  },
 };
