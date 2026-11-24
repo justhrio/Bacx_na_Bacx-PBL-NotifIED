@@ -44,6 +44,7 @@ import {
   extractDefectItems,
   fetchBackendEmailDispatches,
   fetchBackendEmailRecipients,
+  fetchEmailTransportStatus,
   fetchEventDocuments,
   formatDefectsForRevisionNote,
   generateAiSurvey,
@@ -78,6 +79,7 @@ import { PublicSurveyPage } from "./components/PublicSurveyPage";
 import {
   EmailPreviewModal,
   EmailSyndicationStatusCard,
+  formatRoleLabel,
   InstitutionalMailingListView,
 } from "./components/EmailSyndicationComponents";
 import adminBg from "../assets/admin-bg.jpeg";
@@ -580,6 +582,7 @@ export function CoordinatorInterface({
   const [surveyTargetGroups, setSurveyTargetGroups] = useState<RecipientRole[]>([
     "student",
     "faculty",
+    "all_campus",
   ]);
   const [mailingRecipients, setMailingRecipients] = useState<InstitutionalRecipientRecord[]>([]);
   const [emailProviderStatus, setEmailProviderStatus] = useState<EmailProviderStatus | null>(null);
@@ -626,6 +629,8 @@ export function CoordinatorInterface({
         survey_id: null,
         survey_url: carried.surveyUrl,
         status: carried.status,
+        delivery_provider: carried.deliveryProvider ?? null,
+        preview_url: carried.previewUrl ?? null,
         target_groups: carried.targetGroups,
         recipient_count: carried.recipientCount,
         email_subject: carried.emailSubject,
@@ -764,20 +769,23 @@ export function CoordinatorInterface({
     }
   };
 
-  // Sync Institutional Mailing List, Email Dispatches, Published Surveys, and Live Survey Responses
+  // Sync Institutional Distribution Lists, Email Dispatches, Published Surveys, and Live Survey Responses
   const fetchSyndicationData = async () => {
     setMailingLoading(true);
     try {
-      // 1. Institutional Recipients (Supabase primary, backend fallback)
-      const [dbRecRes, backendRecRes] = await Promise.all([
+      // 1. Institutional Distribution Lists + Email Transport Status (Supabase primary, backend fallback)
+      const [dbRecRes, backendRecRes, transportStatus] = await Promise.all([
         supabase
           .from("institutional_recipients")
-          .select("*")
+          .select("id, email, role, department, is_active, created_at, updated_at")
           .order("created_at", { ascending: false }),
         fetchBackendEmailRecipients(),
+        fetchEmailTransportStatus(),
       ]);
 
-      if (backendRecRes?.emailProvider) {
+      if (transportStatus) {
+        setEmailProviderStatus(transportStatus);
+      } else if (backendRecRes?.emailProvider) {
         setEmailProviderStatus(backendRecRes.emailProvider);
       }
 
@@ -1386,24 +1394,36 @@ export function CoordinatorInterface({
     // Ensure Supabase public.email_dispatches has the latest dispatch record (even when backend lacks service_role key)
     try {
       const validUuid = /^[0-9a-f-]{36}$/i.test(dispatch.id);
-      await supabase.from("email_dispatches").upsert(
-        {
-          ...(validUuid ? { id: dispatch.id } : {}),
-          proposal_id: targetEv.event_id,
-          survey_id: dispatch.survey_id,
-          survey_url: dispatch.survey_url,
-          status: dispatch.status,
-          target_groups: dispatch.target_groups,
-          recipient_count: dispatch.recipient_count,
-          email_subject: dispatch.email_subject,
-          email_html_preview: dispatch.email_html_preview,
-          email_text_fallback: dispatch.email_text_fallback,
-          sent_at: dispatch.sent_at,
-          error_message: dispatch.error_message,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+      const baseRow = {
+        ...(validUuid ? { id: dispatch.id } : {}),
+        proposal_id: targetEv.event_id,
+        survey_id: dispatch.survey_id,
+        survey_url: dispatch.survey_url,
+        status: dispatch.status,
+        target_groups: dispatch.target_groups,
+        recipient_count: dispatch.recipient_count,
+        email_subject: dispatch.email_subject,
+        email_html_preview: dispatch.email_html_preview,
+        email_text_fallback: dispatch.email_text_fallback,
+        sent_at: dispatch.sent_at,
+        error_message: dispatch.error_message,
+        updated_at: new Date().toISOString(),
+      };
+      const extendedRow = {
+        ...baseRow,
+        ...(dispatch.delivery_provider ? { delivery_provider: dispatch.delivery_provider } : {}),
+        ...(dispatch.preview_url ? { preview_url: dispatch.preview_url } : {}),
+      };
+      const { error: upsertErr } = await supabase
+        .from("email_dispatches")
+        .upsert(extendedRow, { onConflict: "id" });
+
+      if (
+        upsertErr &&
+        (upsertErr.message.includes("delivery_provider") || upsertErr.message.includes("preview_url"))
+      ) {
+        await supabase.from("email_dispatches").upsert(baseRow, { onConflict: "id" });
+      }
     } catch {
       // Table may not exist yet; graceful local cache & events bundle fallback applies
     }
@@ -1422,6 +1442,8 @@ export function CoordinatorInterface({
           emailDispatch: {
             id: dispatch.id,
             status: dispatch.status,
+            deliveryProvider: dispatch.delivery_provider ?? null,
+            previewUrl: dispatch.preview_url ?? null,
             targetGroups: dispatch.target_groups,
             recipientCount: dispatch.recipient_count,
             emailSubject: dispatch.email_subject,
@@ -1793,27 +1815,37 @@ export function CoordinatorInterface({
     }
   };
 
-  // ── Mailing List CRUD Handlers (Supabase primary, backend /api/email/recipients fallback) ──
+  // ── Distribution List CRUD Handlers (Supabase primary, backend /api/email/recipients fallback) ──
   const handleAddMailingRecipient = async (input: {
-    full_name: string;
     email: string;
     role: RecipientRole;
     department: string;
   }) => {
+    const cleanedEmail = input.email.trim().toLowerCase();
     const payload = {
-      full_name: input.full_name,
-      email: input.email.trim().toLowerCase(),
+      email: cleanedEmail,
       role: input.role,
-      department: input.department || "General",
+      department: input.department.trim() || "All Departments",
       is_active: true,
       updated_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("institutional_recipients")
       .upsert(payload, { onConflict: "email" })
-      .select("*")
+      .select("id, email, role, department, is_active, created_at, updated_at")
       .single();
+
+    // Graceful retry if the legacy NOT NULL constraint on full_name hasn't been dropped yet
+    if (error && error.message.toLowerCase().includes("full_name")) {
+      const retry = await supabase
+        .from("institutional_recipients")
+        .upsert({ ...payload, full_name: cleanedEmail }, { onConflict: "email" })
+        .select("id, email, role, department, is_active, created_at, updated_at")
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (!error && data) {
       const rec = data as InstitutionalRecipientRecord;
@@ -3260,25 +3292,25 @@ export function CoordinatorInterface({
                 />
               </div>
 
-              {/* Institutional Email Syndication Target Audience (auto-dispatched once survey finalizes for approved events) */}
+              {/* Institutional Distribution List Target Audience (auto-dispatched once survey finalizes for approved events) */}
               <div className="p-3.5 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div className="space-y-1">
                   <div className="text-[11px] font-bold text-[#18212F] flex items-center gap-1.5">
-                    <Mail className="size-3.5 text-[#24408E]" /> Automatic Institutional Email Syndication Audience
+                    <Mail className="size-3.5 text-[#24408E]" /> Institutional Distribution Lists Audience
                   </div>
                   <p className="text-[11px] text-[#5B6678]">
-                    For approved events, finalizing this survey automatically formats and BCC-dispatches the announcement email with Registration + Survey links.
+                    For approved events, finalizing this survey automatically formats and BCC-dispatches to active campus group emails (e.g., allstudents@apc.edu.ph, allfaculty@apc.edu.ph).
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  {(["student", "faculty", "staff"] as const).map((role) => {
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {(["student", "faculty", "staff", "all_campus"] as const).map((role) => {
                     const checked = surveyTargetGroups.includes(role);
                     const count = mailingRecipients.filter((r) => r.is_active && r.role === role).length;
                     return (
                       <label
                         key={role}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-none border text-[11px] font-semibold capitalize cursor-pointer transition ${
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-none border text-[11px] font-semibold cursor-pointer transition ${
                           checked
                             ? "bg-[#EAEFFA] border-[#24408E] text-[#24408E]"
                             : "bg-white border-[#C9D0DB] text-[#5B6678]"
@@ -3296,7 +3328,7 @@ export function CoordinatorInterface({
                           }}
                           className="accent-[#24408E] rounded-none"
                         />
-                        {role === "student" ? "Students" : role === "faculty" ? "Faculty" : "Staff"} ({count})
+                        {formatRoleLabel(role)} ({count})
                       </label>
                     );
                   })}
@@ -3305,7 +3337,7 @@ export function CoordinatorInterface({
                     onClick={() => setActiveNav("mailing")}
                     className="text-[11px] font-semibold text-[#24408E] hover:underline cursor-pointer"
                   >
-                    Manage Mailing List →
+                    Manage Distribution Lists →
                   </button>
                 </div>
               </div>

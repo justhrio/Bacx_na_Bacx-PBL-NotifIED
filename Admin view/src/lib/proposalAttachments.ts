@@ -33,6 +33,8 @@ export interface CarriedPublishedSurvey {
 export interface CarriedEmailDispatchMeta {
   id: string;
   status: DispatchStatus;
+  deliveryProvider?: "smtp" | "resend" | "sandbox" | null;
+  previewUrl?: string | null;
   targetGroups: RecipientRole[];
   recipientCount: number;
   emailSubject: string | null;

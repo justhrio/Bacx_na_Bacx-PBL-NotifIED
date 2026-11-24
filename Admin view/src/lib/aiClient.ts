@@ -473,12 +473,12 @@ export async function analyzeAiSurveyFeedback(
 // 5. Institutional Email Syndication & Public Survey APIs
 // ============================================================================
 
-export type RecipientRole = "student" | "faculty" | "staff";
+export type RecipientRole = "student" | "faculty" | "staff" | "all_campus";
 export type DispatchStatus = "PENDING_SURVEY" | "SENDING" | "SENT" | "FAILED";
+export type EmailProviderType = "smtp" | "resend" | "sandbox";
 
 export interface InstitutionalRecipientRecord {
   id: string;
-  full_name: string;
   email: string;
   role: RecipientRole;
   department: string;
@@ -488,9 +488,11 @@ export interface InstitutionalRecipientRecord {
 }
 
 export interface EmailProviderStatus {
-  provider: "smtp" | "resend" | "unconfigured";
+  provider: EmailProviderType;
   configured: boolean;
-  fromAddress: string | null;
+  mode?: "live" | "sandbox";
+  requireLiveEmail?: boolean;
+  fromAddress?: string | null;
   detail: string;
 }
 
@@ -500,6 +502,8 @@ export interface EmailDispatchRecord {
   survey_id: string | null;
   survey_url: string | null;
   status: DispatchStatus;
+  delivery_provider?: EmailProviderType | null;
+  preview_url?: string | null;
   target_groups: RecipientRole[];
   recipient_count: number;
   email_subject: string | null;
@@ -540,6 +544,7 @@ export interface SyndicateEmailParams {
   surveyToken?: string | null;
   surveyUrl: string;
   targetRoles?: RecipientRole[];
+  targetDepartment?: string;
   eventSnapshot?: Record<string, unknown>;
   fallbackRecipients?: InstitutionalRecipientRecord[];
   posterUrls?: Array<{ url: string; filename?: string; mimeType?: string }>;
@@ -548,7 +553,9 @@ export interface SyndicateEmailParams {
 
 export interface SyndicateEmailResponse {
   dispatch: EmailDispatchRecord;
-  provider?: "smtp" | "resend";
+  provider?: EmailProviderType;
+  isSandbox?: boolean;
+  previewUrl?: string | null;
   batchCount?: number;
   modelUsed?: string;
   emailProvider?: EmailProviderStatus;
@@ -658,6 +665,9 @@ export async function syndicateEventEmail(
     if (params.targetRoles) {
       formData.append("targetRoles", JSON.stringify(params.targetRoles));
     }
+    if (params.targetDepartment) {
+      formData.append("targetDepartment", params.targetDepartment);
+    }
     if (params.eventSnapshot) {
       formData.append("eventSnapshot", JSON.stringify(params.eventSnapshot));
     }
@@ -681,6 +691,7 @@ export async function syndicateEventEmail(
         surveyToken: params.surveyToken,
         surveyUrl: params.surveyUrl,
         targetRoles: params.targetRoles,
+        targetDepartment: params.targetDepartment,
         eventSnapshot: params.eventSnapshot,
         fallbackRecipients: params.fallbackRecipients,
         posterUrls: params.posterUrls,
@@ -714,6 +725,18 @@ export async function syndicateEventEmail(
   return payload as SyndicateEmailResponse;
 }
 
+export async function fetchEmailTransportStatus(): Promise<EmailProviderStatus | null> {
+  const baseUrl = getAiBackendUrl();
+  if (!baseUrl) return null;
+  try {
+    const res = await fetch(`${baseUrl}/api/email/status`);
+    if (!res.ok) return null;
+    return (await res.json()) as EmailProviderStatus;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBackendEmailRecipients(): Promise<{
   recipients: InstitutionalRecipientRecord[];
   storage: "supabase" | "memory";
@@ -731,7 +754,6 @@ export async function fetchBackendEmailRecipients(): Promise<{
 }
 
 export async function createBackendEmailRecipient(input: {
-  full_name: string;
   email: string;
   role: RecipientRole;
   department: string;
@@ -750,7 +772,7 @@ export async function createBackendEmailRecipient(input: {
 
 export async function updateBackendEmailRecipient(
   id: string,
-  patch: Partial<Pick<InstitutionalRecipientRecord, "full_name" | "email" | "role" | "department" | "is_active">>
+  patch: Partial<Pick<InstitutionalRecipientRecord, "email" | "role" | "department" | "is_active">>
 ): Promise<InstitutionalRecipientRecord> {
   const baseUrl = requireAiBackendUrl();
   const endpoint = `${baseUrl}/api/email/recipients/${encodeURIComponent(id)}`;

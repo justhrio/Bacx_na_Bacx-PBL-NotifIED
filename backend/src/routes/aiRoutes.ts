@@ -677,7 +677,7 @@ router.get("/surveys/event/:eventId/responses", async (req: Request, res: Respon
 // ============================================================================
 
 function parseTargetRoles(raw: unknown): RecipientRole[] {
-  const allowed: RecipientRole[] = ["student", "faculty", "staff"];
+  const allowed: RecipientRole[] = ["student", "faculty", "staff", "all_campus"];
   let items: unknown[] = [];
   if (Array.isArray(raw)) {
     items = raw;
@@ -698,7 +698,8 @@ function parseTargetRoles(raw: unknown): RecipientRole[] {
 /**
  * POST /api/ai/syndicate-email
  * Triggered automatically once an approved event's post-event survey is generated & saved.
- * Synthesizes an institutional HTML email with Gemini multimodal AI and dispatches via BCC batching.
+ * Synthesizes an institutional HTML email with Gemini multimodal AI and dispatches via BCC batching
+ * (Live SMTP / Resend, or automatic Nodemailer Ethereal Sandbox fallback with previewUrl).
  */
 router.post(
   "/syndicate-email",
@@ -717,6 +718,8 @@ router.post(
       }
 
       const targetRoles = parseTargetRoles(body.targetRoles ?? body.target_groups);
+      const targetDepartment =
+        typeof body.targetDepartment === "string" ? body.targetDepartment.trim() : undefined;
       const rawSurveyId =
         typeof body.surveyId === "string"
           ? body.surveyId.trim()
@@ -801,25 +804,43 @@ router.post(
         return;
       }
 
-      // 3. Resolve active institutional recipients matching targetRoles
+      // 3. Resolve active institutional distribution lists matching targetRoles & optional department
       const { recipients: dbRecipients, storage: recipientStorage } =
         await listInstitutionalRecipients({
           roles: targetRoles,
+          department: targetDepartment,
           activeOnly: true,
         });
 
       let recipientEmails = dbRecipients.map((r) => r.email);
 
-      // If backend has not connected to Supabase yet and caller passed Supabase-loaded active recipients, use those
-      if (recipientStorage === "memory" && Array.isArray(body.fallbackRecipients)) {
-        const filteredFallback = (body.fallbackRecipients as Array<Record<string, any>>)
-          .filter(
-            (r) =>
-              r &&
-              typeof r.email === "string" &&
-              r.is_active !== false &&
-              targetRoles.includes(String(r.role || "student").toLowerCase() as RecipientRole)
-          )
+      let fallbackRecipientsList: Array<Record<string, any>> = [];
+      if (Array.isArray(body.fallbackRecipients)) {
+        fallbackRecipientsList = body.fallbackRecipients;
+      } else if (typeof body.fallbackRecipients === "string" && body.fallbackRecipients.trim()) {
+        try {
+          const parsed = JSON.parse(body.fallbackRecipients);
+          if (Array.isArray(parsed)) fallbackRecipientsList = parsed;
+        } catch {
+          fallbackRecipientsList = [];
+        }
+      }
+
+      // If backend has not connected to Supabase yet and caller passed Supabase-loaded active distribution lists, use those
+      if (recipientStorage === "memory" && fallbackRecipientsList.length > 0) {
+        const filteredFallback = fallbackRecipientsList
+          .filter((r) => {
+            if (!r || typeof r.email !== "string" || r.is_active === false) return false;
+            const role = String(r.role || "student").toLowerCase() as RecipientRole;
+            if (!targetRoles.includes(role)) return false;
+            if (targetDepartment && targetDepartment.toLowerCase() !== "all departments") {
+              const dept = String(r.department || "All Departments").toLowerCase();
+              if (dept !== "all departments" && dept !== targetDepartment.toLowerCase()) {
+                return false;
+              }
+            }
+            return true;
+          })
           .map((r) => String(r.email).trim().toLowerCase());
         if (filteredFallback.length > 0) {
           recipientEmails = filteredFallback;
@@ -832,6 +853,7 @@ router.post(
         surveyId: resolvedSurveyId,
         surveyUrl,
         status: "SENDING",
+        deliveryProvider: getEmailProviderStatus().provider,
         targetGroups: targetRoles,
         recipientCount: recipientEmails.length,
       });
@@ -855,8 +877,20 @@ router.post(
         }
       }
 
-      if (posterAttachments.length === 0 && Array.isArray(body.posterUrls)) {
-        for (const item of (body.posterUrls as Array<{ url?: string; filename?: string; mimeType?: string }>).slice(0, 2)) {
+      let parsedPosterUrls: Array<{ url?: string; filename?: string; mimeType?: string }> = [];
+      if (Array.isArray(body.posterUrls)) {
+        parsedPosterUrls = body.posterUrls;
+      } else if (typeof body.posterUrls === "string" && body.posterUrls.trim()) {
+        try {
+          const parsed = JSON.parse(body.posterUrls);
+          if (Array.isArray(parsed)) parsedPosterUrls = parsed;
+        } catch {
+          parsedPosterUrls = [];
+        }
+      }
+
+      if (posterAttachments.length === 0 && parsedPosterUrls.length > 0) {
+        for (const item of parsedPosterUrls.slice(0, 2)) {
           if (item?.url && typeof item.url === "string") {
             try {
               const doc = await downloadFromDocumentUrl({
@@ -910,14 +944,14 @@ router.post(
         posterAttachments.length > 0 ? posterAttachments : undefined
       );
 
-      // Persist synthesized preview immediately so Admin can inspect it even if SMTP transport fails
+      // Persist synthesized preview immediately so Admin can inspect it even if transport fails
       await updateEmailDispatchRecord(dispatchId, {
         email_subject: digest.emailSubject,
         email_html_preview: digest.htmlBody,
         email_text_fallback: digest.plainTextFallback,
       });
 
-      // 7. Dispatch emails via BCC batching (Nodemailer SMTP or Resend fallback)
+      // 7. Dispatch emails via BCC batching (Live SMTP / Resend, or Ethereal Sandbox fallback)
       try {
         const delivery = await sendInstitutionalAnnouncementEmail({
           recipients: recipientEmails,
@@ -928,6 +962,8 @@ router.post(
 
         const sentRecord = await updateEmailDispatchRecord(dispatchId, {
           status: "SENT",
+          delivery_provider: delivery.provider,
+          preview_url: delivery.previewUrl,
           recipient_count: delivery.recipientCount,
           sent_at: new Date().toISOString(),
           error_message: null,
@@ -936,6 +972,8 @@ router.post(
         res.json({
           dispatch: sentRecord,
           provider: delivery.provider,
+          isSandbox: delivery.isSandbox,
+          previewUrl: delivery.previewUrl,
           batchCount: delivery.batchCount,
           modelUsed: digest.modelUsed,
           emailProvider: getEmailProviderStatus(),
@@ -945,6 +983,7 @@ router.post(
           deliveryErr instanceof Error ? deliveryErr.message : "Email transport delivery failed.";
         const failedRecord = await updateEmailDispatchRecord(dispatchId, {
           status: "FAILED",
+          delivery_provider: getEmailProviderStatus().provider,
           recipient_count: recipientEmails.length,
           error_message: errMessage,
         });

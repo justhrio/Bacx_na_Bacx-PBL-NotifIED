@@ -11,7 +11,7 @@ import {
 
 const router = Router();
 
-const VALID_ROLES = new Set<RecipientRole>(["student", "faculty", "staff"]);
+const VALID_ROLES = new Set<RecipientRole>(["student", "faculty", "staff", "all_campus"]);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function parseRole(raw: unknown): RecipientRole | null {
@@ -21,12 +21,29 @@ function parseRole(raw: unknown): RecipientRole | null {
 }
 
 /**
+ * GET /api/email/status
+ * Lightweight transport readiness endpoint (never exposes secrets).
+ */
+router.get("/status", (_req: Request, res: Response): void => {
+  const status = getEmailProviderStatus();
+  res.json({
+    configured: status.configured,
+    provider: status.provider,
+    mode: status.mode,
+    requireLiveEmail: status.requireLiveEmail,
+    detail: status.detail,
+  });
+});
+
+/**
  * GET /api/email/recipients
- * Lists institutional mailing list recipients (optional query filters: ?role=student&activeOnly=true)
+ * Lists institutional distribution list emails (optional query filters: ?role=student&department=SoCIT&activeOnly=true)
  */
 router.get("/recipients", async (req: Request, res: Response): Promise<void> => {
   try {
     const roleParam = req.query.role;
+    const departmentParam =
+      typeof req.query.department === "string" ? req.query.department.trim() : undefined;
     const activeOnly = String(req.query.activeOnly || "").toLowerCase() === "true";
 
     let roles: RecipientRole[] | undefined;
@@ -38,42 +55,41 @@ router.get("/recipients", async (req: Request, res: Response): Promise<void> => 
       if (parsed.length > 0) roles = parsed;
     }
 
-    const { recipients, storage } = await listInstitutionalRecipients({ roles, activeOnly });
+    const { recipients, storage } = await listInstitutionalRecipients({
+      roles,
+      department: departmentParam,
+      activeOnly,
+    });
     res.json({
       recipients,
       storage,
       emailProvider: getEmailProviderStatus(),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load institutional recipients.";
+    const message =
+      err instanceof Error ? err.message : "Failed to load institutional distribution lists.";
     res.status(500).json({ error: message });
   }
 });
 
 /**
  * POST /api/email/recipients
- * Adds (or upserts by email) an institutional recipient for event announcements.
+ * Adds (or upserts by email) an institutional distribution list email (no full_name required).
  */
 router.post("/recipients", async (req: Request, res: Response): Promise<void> => {
   try {
     const body = req.body || {};
-    const fullName = String(body.full_name ?? body.fullName ?? "").trim();
     const email = String(body.email ?? "").trim().toLowerCase();
     const role = parseRole(body.role) || "student";
-    const department = String(body.department ?? "General").trim() || "General";
+    const department = String(body.department ?? "All Departments").trim() || "All Departments";
     const isActive = body.is_active !== undefined ? Boolean(body.is_active) : true;
 
-    if (!fullName) {
-      res.status(400).json({ error: "Recipient full_name is required." });
-      return;
-    }
     if (!email || !EMAIL_REGEX.test(email)) {
-      res.status(400).json({ error: "A valid institutional email address is required." });
+      res.status(400).json({ error: "A valid institutional distribution email address is required." });
       return;
     }
 
     const { recipient, storage } = await addInstitutionalRecipient({
-      full_name: fullName,
       email,
       role,
       department,
@@ -82,40 +98,31 @@ router.post("/recipients", async (req: Request, res: Response): Promise<void> =>
 
     res.status(201).json({ recipient, storage });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to save recipient.";
+    const message = err instanceof Error ? err.message : "Failed to save distribution list.";
     res.status(400).json({ error: message });
   }
 });
 
 /**
  * PATCH /api/email/recipients/:id
- * Toggles is_active or edits an institutional recipient entry.
+ * Toggles is_active or edits a distribution list entry.
  */
 router.patch("/recipients/:id", async (req: Request, res: Response): Promise<void> => {
   try {
     const id = String(req.params.id || "").trim();
     if (!id) {
-      res.status(400).json({ error: "Recipient id is required." });
+      res.status(400).json({ error: "Distribution list id is required." });
       return;
     }
 
     const body = req.body || {};
     const patch: {
-      full_name?: string;
       email?: string;
       role?: RecipientRole;
       department?: string;
       is_active?: boolean;
     } = {};
 
-    if (body.full_name !== undefined || body.fullName !== undefined) {
-      const name = String(body.full_name ?? body.fullName).trim();
-      if (!name) {
-        res.status(400).json({ error: "full_name cannot be empty." });
-        return;
-      }
-      patch.full_name = name;
-    }
     if (body.email !== undefined) {
       const email = String(body.email).trim().toLowerCase();
       if (!EMAIL_REGEX.test(email)) {
@@ -127,13 +134,15 @@ router.patch("/recipients/:id", async (req: Request, res: Response): Promise<voi
     if (body.role !== undefined) {
       const role = parseRole(body.role);
       if (!role) {
-        res.status(400).json({ error: "Role must be one of: student, faculty, staff." });
+        res.status(400).json({
+          error: "Role must be one of: student, faculty, staff, all_campus.",
+        });
         return;
       }
       patch.role = role;
     }
     if (body.department !== undefined) {
-      patch.department = String(body.department).trim() || "General";
+      patch.department = String(body.department).trim() || "All Departments";
     }
     if (body.is_active !== undefined || body.isActive !== undefined) {
       patch.is_active = Boolean(body.is_active ?? body.isActive);
@@ -141,31 +150,31 @@ router.patch("/recipients/:id", async (req: Request, res: Response): Promise<voi
 
     const { recipient, storage } = await updateInstitutionalRecipient(id, patch);
     if (!recipient) {
-      res.status(404).json({ error: "Recipient not found." });
+      res.status(404).json({ error: "Distribution list entry not found." });
       return;
     }
     res.json({ recipient, storage });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update recipient.";
+    const message = err instanceof Error ? err.message : "Failed to update distribution list.";
     res.status(400).json({ error: message });
   }
 });
 
 /**
  * DELETE /api/email/recipients/:id
- * Removes a recipient from the institutional mailing list.
+ * Removes a distribution list email.
  */
 router.delete("/recipients/:id", async (req: Request, res: Response): Promise<void> => {
   try {
     const id = String(req.params.id || "").trim();
     if (!id) {
-      res.status(400).json({ error: "Recipient id is required." });
+      res.status(400).json({ error: "Distribution list id is required." });
       return;
     }
     const { deleted, storage } = await deleteInstitutionalRecipient(id);
     res.json({ deleted, storage });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to delete recipient.";
+    const message = err instanceof Error ? err.message : "Failed to delete distribution list.";
     res.status(400).json({ error: message });
   }
 });

@@ -55,6 +55,7 @@ app.get("/", (_req: Request, res: Response) => {
       "POST /api/ai/surveys/public/:token/responses",
       "POST /api/ai/surveys/analyze",
       "POST /api/ai/syndicate-email",
+      "GET /api/email/status",
       "GET /api/email/recipients",
       "POST /api/email/recipients",
       "GET /api/email/dispatches",
@@ -72,6 +73,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
     supabaseStorageConfigured: Boolean(getSupabaseAdmin()),
     emailConfigured: emailStatus.configured,
     emailProvider: emailStatus.provider,
+    emailMode: emailStatus.mode,
   });
 });
 

@@ -3,24 +3,30 @@
 -- Run this idempotent migration once in Supabase SQL Editor.
 -- ============================================================================
 
--- 1. Institutional Recipient Role ENUM
+-- 1. Institutional Distribution Audience Role ENUM
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_type WHERE typname = 'institutional_recipient_role'
   ) THEN
-    CREATE TYPE public.institutional_recipient_role AS ENUM ('student', 'faculty', 'staff');
+    CREATE TYPE public.institutional_recipient_role AS ENUM ('student', 'faculty', 'staff', 'all_campus');
+  ELSE
+    BEGIN
+      ALTER TYPE public.institutional_recipient_role ADD VALUE IF NOT EXISTS 'all_campus';
+    EXCEPTION WHEN duplicate_object THEN
+      NULL;
+    END;
   END IF;
 END
 $$;
 
--- 2. Institutional Recipient Directory (Students, Faculty, Staff)
+-- 2. Institutional Distribution Lists (Outlook / Campus Group Email Aliases)
 CREATE TABLE IF NOT EXISTS public.institutional_recipients (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  full_name text NOT NULL,
+  full_name text,
   email text NOT NULL UNIQUE,
   role public.institutional_recipient_role NOT NULL DEFAULT 'student',
-  department text NOT NULL DEFAULT 'General',
+  department text NOT NULL DEFAULT 'All Departments',
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -29,13 +35,13 @@ CREATE TABLE IF NOT EXISTS public.institutional_recipients (
 CREATE INDEX IF NOT EXISTS idx_institutional_recipients_role_active
   ON public.institutional_recipients (role, is_active);
 
--- Sample seed rows (Admin Coordinator can add real student/faculty test emails or toggle these in the UI)
-INSERT INTO public.institutional_recipients (full_name, email, role, department, is_active)
+-- Sample campus distribution list seed rows (Admin Coordinator can toggle or add test emails in the UI)
+INSERT INTO public.institutional_recipients (email, role, department, is_active)
 VALUES
-  ('Maria Santos (Demo Student)', 'maria.santos.demo@apc.edu.ph', 'student', 'School of Computing and Information Technologies', true),
-  ('Juan Dela Cruz (Demo Student)', 'juan.delacruz.demo@apc.edu.ph', 'student', 'School of Engineering', true),
-  ('Prof. Elena Reyes (Demo Faculty)', 'elena.reyes.demo@apc.edu.ph', 'faculty', 'School of Computing and Information Technologies', true),
-  ('SAO Communications Desk (Demo Staff)', 'sao.staff.demo@apc.edu.ph', 'staff', 'Student Activities Office', false)
+  ('allstudents@apc.edu.ph', 'student', 'All Departments', true),
+  ('allfaculty@apc.edu.ph', 'faculty', 'All Departments', true),
+  ('socit-students@apc.edu.ph', 'student', 'SoCIT', true),
+  ('allcampus@apc.edu.ph', 'all_campus', 'All Departments', false)
 ON CONFLICT (email) DO NOTHING;
 
 -- 3. Standalone Public Post-Event Evaluation Surveys (No Student Login Required)
@@ -83,6 +89,8 @@ CREATE TABLE IF NOT EXISTS public.email_dispatches (
   survey_url text,
   status text NOT NULL DEFAULT 'PENDING_SURVEY'
     CHECK (status IN ('PENDING_SURVEY', 'SENDING', 'SENT', 'FAILED')),
+  delivery_provider text,
+  preview_url text,
   target_groups text[] NOT NULL DEFAULT ARRAY['student', 'faculty']::text[],
   recipient_count integer NOT NULL DEFAULT 0,
   email_subject text,

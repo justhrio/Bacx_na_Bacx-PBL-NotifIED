@@ -1,13 +1,13 @@
 import crypto from "crypto";
 import { getSupabaseClient } from "../config/supabase.js";
 import type { GeneratedSurveyResult } from "../schemas/aiSchemas.js";
+import type { EmailProviderType } from "./emailService.js";
 
-export type RecipientRole = "student" | "faculty" | "staff";
+export type RecipientRole = "student" | "faculty" | "staff" | "all_campus";
 export type DispatchStatus = "PENDING_SURVEY" | "SENDING" | "SENT" | "FAILED";
 
 export interface InstitutionalRecipientRecord {
   id: string;
-  full_name: string;
   email: string;
   role: RecipientRole;
   department: string;
@@ -22,6 +22,8 @@ export interface EmailDispatchRecord {
   survey_id: string | null;
   survey_url: string | null;
   status: DispatchStatus;
+  delivery_provider?: EmailProviderType | null;
+  preview_url?: string | null;
   target_groups: RecipientRole[];
   recipient_count: number;
   email_subject: string | null;
@@ -69,38 +71,46 @@ export interface PublicSurveyResponseRecord {
 
 const memoryRecipients = new Map<string, InstitutionalRecipientRecord>([
   [
-    "seed-student-1",
+    "seed-dist-students",
     {
-      id: "seed-student-1",
-      full_name: "Maria Santos (Demo Student)",
-      email: "maria.santos.demo@apc.edu.ph",
+      id: "seed-dist-students",
+      email: "allstudents@apc.edu.ph",
       role: "student",
-      department: "School of Computing and Information Technologies",
+      department: "All Departments",
       is_active: true,
       created_at: new Date().toISOString(),
     },
   ],
   [
-    "seed-student-2",
+    "seed-dist-faculty",
     {
-      id: "seed-student-2",
-      full_name: "Juan Dela Cruz (Demo Student)",
-      email: "juan.delacruz.demo@apc.edu.ph",
-      role: "student",
-      department: "School of Engineering",
-      is_active: true,
-      created_at: new Date().toISOString(),
-    },
-  ],
-  [
-    "seed-faculty-1",
-    {
-      id: "seed-faculty-1",
-      full_name: "Prof. Elena Reyes (Demo Faculty)",
-      email: "elena.reyes.demo@apc.edu.ph",
+      id: "seed-dist-faculty",
+      email: "allfaculty@apc.edu.ph",
       role: "faculty",
-      department: "School of Computing and Information Technologies",
+      department: "All Departments",
       is_active: true,
+      created_at: new Date().toISOString(),
+    },
+  ],
+  [
+    "seed-dist-socit",
+    {
+      id: "seed-dist-socit",
+      email: "socit-students@apc.edu.ph",
+      role: "student",
+      department: "SoCIT",
+      is_active: true,
+      created_at: new Date().toISOString(),
+    },
+  ],
+  [
+    "seed-dist-allcampus",
+    {
+      id: "seed-dist-allcampus",
+      email: "allcampus@apc.edu.ph",
+      role: "all_campus",
+      department: "All Departments",
+      is_active: false,
       created_at: new Date().toISOString(),
     },
   ],
@@ -111,7 +121,7 @@ const memorySurveysByToken = new Map<string, PublishedEventSurveyRecord>();
 const memoryResponsesByEvent = new Map<number, PublicSurveyResponseRecord[]>();
 
 function normalizeRoles(roles?: unknown): RecipientRole[] {
-  const valid: RecipientRole[] = ["student", "faculty", "staff"];
+  const valid: RecipientRole[] = ["student", "faculty", "staff", "all_campus"];
   if (!Array.isArray(roles) || roles.length === 0) {
     return ["student", "faculty"];
   }
@@ -121,17 +131,40 @@ function normalizeRoles(roles?: unknown): RecipientRole[] {
   return filtered.length > 0 ? Array.from(new Set(filtered)) : ["student", "faculty"];
 }
 
+function sanitizeRecipientRow(row: any): InstitutionalRecipientRecord {
+  return {
+    id: String(row.id),
+    email: String(row.email || "").trim().toLowerCase(),
+    role: (["student", "faculty", "staff", "all_campus"].includes(String(row.role))
+      ? row.role
+      : "student") as RecipientRole,
+    department: String(row.department || "All Departments").trim() || "All Departments",
+    is_active: row.is_active !== false,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function matchesDepartmentFilter(entryDepartment: string, targetDepartment?: string): boolean {
+  if (!targetDepartment || !targetDepartment.trim()) return true;
+  const target = targetDepartment.trim().toLowerCase();
+  if (target === "all departments" || target === "all") return true;
+  const entry = (entryDepartment || "All Departments").trim().toLowerCase();
+  return entry === "all departments" || entry === "all" || entry === target;
+}
+
 export function generateSurveyToken(eventId: number): string {
   const randomSuffix = crypto.randomBytes(6).toString("hex");
   return `srv_${eventId}_${randomSuffix}`;
 }
 
 // ============================================================================
-// 1. Institutional Recipients Directory
+// 1. Institutional Distribution Lists (Campus Group Emails)
 // ============================================================================
 
 export async function listInstitutionalRecipients(options?: {
   roles?: RecipientRole[];
+  department?: string;
   activeOnly?: boolean;
 }): Promise<{ recipients: InstitutionalRecipientRecord[]; storage: "supabase" | "memory" }> {
   const supabase = getSupabaseClient();
@@ -139,7 +172,7 @@ export async function listInstitutionalRecipients(options?: {
     try {
       let query = supabase
         .from("institutional_recipients")
-        .select("*")
+        .select("id, email, role, department, is_active, created_at, updated_at")
         .order("created_at", { ascending: false });
 
       if (options?.activeOnly) {
@@ -151,8 +184,11 @@ export async function listInstitutionalRecipients(options?: {
 
       const { data, error } = await query;
       if (!error && Array.isArray(data)) {
+        const cleaned = data
+          .map(sanitizeRecipientRow)
+          .filter((r) => matchesDepartmentFilter(r.department, options?.department));
         return {
-          recipients: data as InstitutionalRecipientRecord[],
+          recipients: cleaned,
           storage: "supabase",
         };
       }
@@ -172,11 +208,13 @@ export async function listInstitutionalRecipients(options?: {
     const allowed = new Set(options.roles);
     items = items.filter((r) => allowed.has(r.role));
   }
+  if (options?.department) {
+    items = items.filter((r) => matchesDepartmentFilter(r.department, options.department));
+  }
   return { recipients: items, storage: "memory" };
 }
 
 export async function addInstitutionalRecipient(input: {
-  full_name: string;
   email: string;
   role: RecipientRole;
   department?: string;
@@ -184,10 +222,9 @@ export async function addInstitutionalRecipient(input: {
 }): Promise<{ recipient: InstitutionalRecipientRecord; storage: "supabase" | "memory" }> {
   const cleanedEmail = input.email.trim().toLowerCase();
   const payload = {
-    full_name: input.full_name.trim(),
     email: cleanedEmail,
     role: input.role,
-    department: (input.department || "General").trim() || "General",
+    department: (input.department || "All Departments").trim() || "All Departments",
     is_active: input.is_active ?? true,
     updated_at: new Date().toISOString(),
   };
@@ -198,12 +235,25 @@ export async function addInstitutionalRecipient(input: {
       const { data, error } = await supabase
         .from("institutional_recipients")
         .upsert(payload, { onConflict: "email" })
-        .select("*")
+        .select("id, email, role, department, is_active, created_at, updated_at")
         .single();
 
       if (!error && data) {
-        return { recipient: data as InstitutionalRecipientRecord, storage: "supabase" };
+        return { recipient: sanitizeRecipientRow(data), storage: "supabase" };
       }
+
+      // Graceful fallback if the older NOT NULL constraint on full_name hasn't been dropped yet
+      if (error && error.message.toLowerCase().includes("full_name")) {
+        const retry = await supabase
+          .from("institutional_recipients")
+          .upsert({ ...payload, full_name: cleanedEmail }, { onConflict: "email" })
+          .select("id, email, role, department, is_active, created_at, updated_at")
+          .single();
+        if (!retry.error && retry.data) {
+          return { recipient: sanitizeRecipientRow(retry.data), storage: "supabase" };
+        }
+      }
+
       if (error) {
         console.warn("[SyndicationStore] institutional_recipients insert fallback:", error.message);
       }
@@ -225,15 +275,16 @@ export async function addInstitutionalRecipient(input: {
 
 export async function updateInstitutionalRecipient(
   id: string,
-  patch: Partial<Pick<InstitutionalRecipientRecord, "full_name" | "email" | "role" | "department" | "is_active">>
+  patch: Partial<Pick<InstitutionalRecipientRecord, "email" | "role" | "department" | "is_active">>
 ): Promise<{ recipient: InstitutionalRecipientRecord | null; storage: "supabase" | "memory" }> {
   const cleanedPatch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
-  if (patch.full_name !== undefined) cleanedPatch.full_name = patch.full_name.trim();
   if (patch.email !== undefined) cleanedPatch.email = patch.email.trim().toLowerCase();
   if (patch.role !== undefined) cleanedPatch.role = patch.role;
-  if (patch.department !== undefined) cleanedPatch.department = patch.department.trim() || "General";
+  if (patch.department !== undefined) {
+    cleanedPatch.department = patch.department.trim() || "All Departments";
+  }
   if (patch.is_active !== undefined) cleanedPatch.is_active = Boolean(patch.is_active);
 
   const supabase = getSupabaseClient();
@@ -243,11 +294,11 @@ export async function updateInstitutionalRecipient(
         .from("institutional_recipients")
         .update(cleanedPatch)
         .eq("id", id)
-        .select("*")
+        .select("id, email, role, department, is_active, created_at, updated_at")
         .single();
 
       if (!error && data) {
-        return { recipient: data as InstitutionalRecipientRecord, storage: "supabase" };
+        return { recipient: sanitizeRecipientRow(data), storage: "supabase" };
       }
     } catch (err) {
       console.warn("[SyndicationStore] institutional_recipients update exception:", err);
@@ -296,6 +347,8 @@ export async function createEmailDispatchRecord(input: {
   surveyId?: string | null;
   surveyUrl?: string | null;
   status: DispatchStatus;
+  deliveryProvider?: EmailProviderType | null;
+  previewUrl?: string | null;
   targetGroups?: RecipientRole[];
   recipientCount?: number;
 }): Promise<EmailDispatchRecord> {
@@ -305,24 +358,44 @@ export async function createEmailDispatchRecord(input: {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const baseInsert = {
+        proposal_id: input.proposalId,
+        survey_id: input.surveyId ?? null,
+        survey_url: input.surveyUrl ?? null,
+        status: input.status,
+        target_groups: targetGroups,
+        recipient_count: input.recipientCount ?? 0,
+        updated_at: now,
+      };
+      const extendedInsert = {
+        ...baseInsert,
+        ...(input.deliveryProvider ? { delivery_provider: input.deliveryProvider } : {}),
+        ...(input.previewUrl ? { preview_url: input.previewUrl } : {}),
+      };
+
+      let { data, error } = await supabase
         .from("email_dispatches")
-        .insert([
-          {
-            proposal_id: input.proposalId,
-            survey_id: input.surveyId ?? null,
-            survey_url: input.surveyUrl ?? null,
-            status: input.status,
-            target_groups: targetGroups,
-            recipient_count: input.recipientCount ?? 0,
-            updated_at: now,
-          },
-        ])
+        .insert([extendedInsert])
         .select("*")
         .single();
 
+      // Retry without optional columns if supabase_mailing_list_update.sql hasn't run yet
+      if (error && (error.message.includes("delivery_provider") || error.message.includes("preview_url"))) {
+        const retry = await supabase
+          .from("email_dispatches")
+          .insert([baseInsert])
+          .select("*")
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (!error && data) {
-        const record = data as EmailDispatchRecord;
+        const record: EmailDispatchRecord = {
+          ...(data as EmailDispatchRecord),
+          delivery_provider: (data as any).delivery_provider ?? input.deliveryProvider ?? null,
+          preview_url: (data as any).preview_url ?? input.previewUrl ?? null,
+        };
         memoryDispatches.set(record.id, record);
         return record;
       }
@@ -340,6 +413,8 @@ export async function createEmailDispatchRecord(input: {
     survey_id: input.surveyId ?? null,
     survey_url: input.surveyUrl ?? null,
     status: input.status,
+    delivery_provider: input.deliveryProvider ?? null,
+    preview_url: input.previewUrl ?? null,
     target_groups: targetGroups,
     recipient_count: input.recipientCount ?? 0,
     email_subject: null,
@@ -360,6 +435,8 @@ export async function updateEmailDispatchRecord(
     Pick<
       EmailDispatchRecord,
       | "status"
+      | "delivery_provider"
+      | "preview_url"
       | "survey_id"
       | "survey_url"
       | "recipient_count"
@@ -375,7 +452,7 @@ export async function updateEmailDispatchRecord(
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("email_dispatches")
         .update({
           ...patch,
@@ -385,8 +462,33 @@ export async function updateEmailDispatchRecord(
         .select("*")
         .single();
 
+      if (error && (error.message.includes("delivery_provider") || error.message.includes("preview_url"))) {
+        const { delivery_provider: _dp, preview_url: _pu, ...safePatch } = patch;
+        const retry = await supabase
+          .from("email_dispatches")
+          .update({
+            ...safePatch,
+            updated_at: now,
+          })
+          .eq("id", id)
+          .select("*")
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (!error && data) {
-        const record = data as EmailDispatchRecord;
+        const existingMem = memoryDispatches.get(id);
+        const record: EmailDispatchRecord = {
+          ...(data as EmailDispatchRecord),
+          delivery_provider:
+            (data as any).delivery_provider ??
+            patch.delivery_provider ??
+            existingMem?.delivery_provider ??
+            null,
+          preview_url:
+            (data as any).preview_url ?? patch.preview_url ?? existingMem?.preview_url ?? null,
+        };
         memoryDispatches.set(record.id, record);
         return record;
       }
@@ -510,7 +612,6 @@ export async function findPublishedSurveyByTokenOrId(
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      // Try matching by survey_token first, then UUID id
       const { data: byToken, error: tokenErr } = await supabase
         .from("event_surveys")
         .select("*")

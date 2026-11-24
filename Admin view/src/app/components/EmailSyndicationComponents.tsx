@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   Eye,
+  FlaskConical,
   Loader2,
   Mail,
   Plus,
@@ -14,7 +15,6 @@ import {
   Send,
   ShieldCheck,
   Trash2,
-  UserCheck,
   Users,
   X,
 } from "lucide-react";
@@ -25,15 +25,28 @@ import type {
   RecipientRole,
 } from "../../lib/aiClient";
 
+const DEPARTMENT_SUGGESTIONS = [
+  "All Departments",
+  "SoCIT",
+  "SoE",
+  "SoM",
+  "SoA",
+  "SHS",
+  "SAO",
+];
+
+export function formatRoleLabel(role: RecipientRole | string): string {
+  const lower = String(role).toLowerCase();
+  if (lower === "student") return "Students";
+  if (lower === "faculty") return "Faculty";
+  if (lower === "staff") return "Staff";
+  if (lower === "all_campus") return "All Campus";
+  return role;
+}
+
 export function formatTargetGroupLabel(groups?: RecipientRole[] | string[]): string {
   if (!groups || groups.length === 0) return "Students & Faculty";
-  const labels = groups.map((g) => {
-    const lower = String(g).toLowerCase();
-    if (lower === "student") return "Students";
-    if (lower === "faculty") return "Faculty";
-    if (lower === "staff") return "Staff";
-    return g;
-  });
+  const labels = groups.map((g) => formatRoleLabel(g));
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]} & ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")} & ${labels[labels.length - 1]}`;
@@ -53,6 +66,8 @@ export function EmailPreviewModal({
   retrying?: boolean;
 }) {
   const [viewMode, setViewMode] = useState<"html" | "text">("html");
+  const isSandbox =
+    dispatch.delivery_provider === "sandbox" || Boolean(dispatch.preview_url);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18212F]/60 backdrop-blur-xs">
@@ -65,6 +80,11 @@ export function EmailPreviewModal({
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#F2B84B]">
                 Institutional Email Syndication Preview
               </span>
+              {isSandbox && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FFF4DC] text-[#8A5A00] text-[10px] font-bold">
+                  <FlaskConical className="size-3" /> Sandbox Preview
+                </span>
+              )}
             </div>
             <h3 className="text-sm font-bold text-white truncate mt-0.5">
               {dispatch.email_subject || eventTitle || "Approved Event Announcement"}
@@ -85,14 +105,18 @@ export function EmailPreviewModal({
             <span
               className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
                 dispatch.status === "SENT"
-                  ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
+                  ? isSandbox
+                    ? "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
+                    : "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
                   : dispatch.status === "FAILED"
                   ? "bg-[#FBEDEC] text-[#B3261E] border-[#E2B3AF]"
                   : "bg-[#EAEFFA] text-[#24408E] border-[#C5D3F3]"
               }`}
             >
               {dispatch.status === "SENT"
-                ? `✓ Sent to ${dispatch.recipient_count} Recipient${dispatch.recipient_count === 1 ? "" : "s"}`
+                ? `${isSandbox ? "Sandbox Dispatched" : "✓ Dispatched"} to ${dispatch.recipient_count} Distribution List${
+                    dispatch.recipient_count === 1 ? "" : "s"
+                  }`
                 : dispatch.status === "FAILED"
                 ? "! Delivery Failed"
                 : "Sending..."}
@@ -137,6 +161,26 @@ export function EmailPreviewModal({
             </button>
           </div>
         </div>
+
+        {/* Sandbox Notice Bar when sent through Ethereal */}
+        {isSandbox && dispatch.status === "SENT" && (
+          <div className="px-6 py-2.5 bg-[#FFF4DC] border-b border-[#E5C98B] text-xs text-[#6B4600] flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <span className="flex items-center gap-1.5">
+              <FlaskConical className="size-3.5 text-[#8A5A00] shrink-0" />
+              Sent via Nodemailer Ethereal Sandbox Relay. Add live SMTP or Resend credentials in Vercel to deliver to real institutional inboxes.
+            </span>
+            {dispatch.preview_url && (
+              <a
+                href={dispatch.preview_url}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1 rounded bg-white hover:bg-[#F7F8FA] border border-[#E5C98B] text-[#8A5A00] font-semibold text-[11px] flex items-center gap-1 shrink-0"
+              >
+                Open Ethereal Test Inbox <ExternalLink className="size-3" />
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Error Banner if Delivery Failed */}
         {dispatch.status === "FAILED" && dispatch.error_message && (
@@ -186,19 +230,29 @@ export function EmailPreviewModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-white border-t border-[#DDE2EA] flex items-center justify-between gap-3 text-xs shrink-0">
-          {dispatch.survey_url ? (
-            <a
-              href={dispatch.survey_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[#24408E] hover:underline font-medium flex items-center gap-1 truncate"
-            >
-              Open Public Survey Link <ExternalLink className="size-3 shrink-0" />
-            </a>
-          ) : (
-            <span className="text-[#5B6678]">Verified institutional digest</span>
-          )}
+        <div className="px-6 py-3 bg-white border-t border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex flex-wrap items-center gap-4">
+            {dispatch.survey_url && (
+              <a
+                href={dispatch.survey_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#24408E] hover:underline font-medium flex items-center gap-1"
+              >
+                Open Public Survey Link <ExternalLink className="size-3 shrink-0" />
+              </a>
+            )}
+            {dispatch.preview_url && (
+              <a
+                href={dispatch.preview_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#8A5A00] hover:underline font-medium flex items-center gap-1"
+              >
+                Open Ethereal Inbox <ExternalLink className="size-3 shrink-0" />
+              </a>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -234,6 +288,8 @@ export function EmailSyndicationStatusCard({
   const effectiveStatus = isSending
     ? "SENDING"
     : dispatch?.status || "PENDING_SURVEY";
+  const isSandbox =
+    dispatch?.delivery_provider === "sandbox" || Boolean(dispatch?.preview_url);
 
   const copyLink = async (url: string) => {
     try {
@@ -251,7 +307,9 @@ export function EmailSyndicationStatusCard({
         compact ? "p-3.5" : "p-4"
       } ${
         effectiveStatus === "SENT"
-          ? "bg-[#E6F3EC]/60 border-[#B6DFC8]"
+          ? isSandbox
+            ? "bg-[#FFF9EB] border-[#E5C98B]"
+            : "bg-[#E6F3EC]/60 border-[#B6DFC8]"
           : effectiveStatus === "FAILED"
           ? "bg-[#FBEDEC]/70 border-[#E2B3AF]"
           : effectiveStatus === "SENDING"
@@ -264,7 +322,11 @@ export function EmailSyndicationStatusCard({
           {effectiveStatus === "SENDING" ? (
             <Loader2 className="size-4 animate-spin text-[#24408E] shrink-0" />
           ) : effectiveStatus === "SENT" ? (
-            <CheckCircle2 className="size-4 text-[#1F7A4D] shrink-0" />
+            isSandbox ? (
+              <FlaskConical className="size-4 text-[#8A5A00] shrink-0" />
+            ) : (
+              <CheckCircle2 className="size-4 text-[#1F7A4D] shrink-0" />
+            )
           ) : effectiveStatus === "FAILED" ? (
             <AlertCircle className="size-4 text-[#B3261E] shrink-0" />
           ) : (
@@ -273,9 +335,9 @@ export function EmailSyndicationStatusCard({
 
           <span>
             {effectiveStatus === "SENDING"
-              ? "AI Formatting & Pushing to Institutional Emails..."
+              ? "AI Formatting & Pushing to Institutional Distribution Lists..."
               : effectiveStatus === "SENT"
-              ? `Sent to ${dispatch?.recipient_count || 0} Institutional Recipient${
+              ? `Dispatched to ${dispatch?.recipient_count || 0} distribution list${
                   (dispatch?.recipient_count || 0) === 1 ? "" : "s"
                 } (${formatTargetGroupLabel(dispatch?.target_groups)})`
               : effectiveStatus === "FAILED"
@@ -284,25 +346,36 @@ export function EmailSyndicationStatusCard({
           </span>
         </div>
 
-        <span
-          className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded uppercase border ${
-            effectiveStatus === "SENT"
-              ? "bg-white text-[#1F7A4D] border-[#B6DFC8]"
-              : effectiveStatus === "FAILED"
-              ? "bg-white text-[#B3261E] border-[#E2B3AF]"
+        <div className="flex items-center gap-1.5">
+          {effectiveStatus === "SENT" && isSandbox && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] uppercase">
+              <FlaskConical className="size-3" /> Sandbox Preview
+            </span>
+          )}
+          <span
+            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded uppercase border ${
+              effectiveStatus === "SENT"
+                ? isSandbox
+                  ? "bg-white text-[#8A5A00] border-[#E5C98B]"
+                  : "bg-white text-[#1F7A4D] border-[#B6DFC8]"
+                : effectiveStatus === "FAILED"
+                ? "bg-white text-[#B3261E] border-[#E2B3AF]"
+                : effectiveStatus === "SENDING"
+                ? "bg-white text-[#24408E] border-[#C5D3F3]"
+                : "bg-white text-[#5B6678] border-[#DDE2EA]"
+            }`}
+          >
+            {effectiveStatus === "PENDING_SURVEY"
+              ? "Pending Survey"
               : effectiveStatus === "SENDING"
-              ? "bg-white text-[#24408E] border-[#C5D3F3]"
-              : "bg-white text-[#5B6678] border-[#DDE2EA]"
-          }`}
-        >
-          {effectiveStatus === "PENDING_SURVEY"
-            ? "Pending Survey"
-            : effectiveStatus === "SENDING"
-            ? "Auto-Dispatching"
-            : effectiveStatus === "SENT"
-            ? "Syndicated"
-            : "Failed"}
-        </span>
+              ? "Auto-Dispatching"
+              : effectiveStatus === "SENT"
+              ? isSandbox
+                ? "Ethereal Relay"
+                : "Live Sent"
+              : "Failed"}
+          </span>
+        </div>
       </div>
 
       {/* Lifecycle Mini Stepper */}
@@ -324,7 +397,9 @@ export function EmailSyndicationStatusCard({
         <span
           className={`px-1.5 py-0.5 rounded font-semibold ${
             effectiveStatus === "SENT"
-              ? "bg-[#E6F3EC] text-[#1F7A4D]"
+              ? isSandbox
+                ? "bg-[#FFF4DC] text-[#8A5A00]"
+                : "bg-[#E6F3EC] text-[#1F7A4D]"
               : effectiveStatus === "SENDING"
               ? "bg-[#24408E] text-white"
               : effectiveStatus === "FAILED"
@@ -339,7 +414,7 @@ export function EmailSyndicationStatusCard({
       {effectiveStatus === "PENDING_SURVEY" && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#5B6678]">
           <span>
-            Once this approved event&apos;s post-event survey is generated, CampusSync AI will automatically format and dispatch the announcement email.
+            Once this approved event&apos;s post-event survey is generated, CampusSync AI will automatically format and dispatch the announcement to active institutional distribution lists.
           </span>
           {onOpenSurveyTab && (
             <button
@@ -394,12 +469,13 @@ export function EmailSyndicationStatusCard({
         </div>
       )}
 
-      {/* Action Buttons: Preview (when HTML exists) & Retry (ONLY when FAILED) */}
-      {(dispatch?.email_html_preview || effectiveStatus === "FAILED") && (
+      {/* Action Buttons: Ethereal Preview (if sandbox), HTML Preview Modal, & Retry (ONLY when FAILED) */}
+      {(dispatch?.email_html_preview || dispatch?.preview_url || effectiveStatus === "FAILED") && (
         <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
           {dispatch?.sent_at ? (
-            <span className="text-[10px] text-[#1F7A4D]">
-              Dispatched {new Date(dispatch.sent_at).toLocaleString()}
+            <span className={`text-[10px] ${isSandbox ? "text-[#8A5A00]" : "text-[#1F7A4D]"}`}>
+              {isSandbox ? "Sandbox preview sent" : "Dispatched"}{" "}
+              {new Date(dispatch.sent_at).toLocaleString()}
             </span>
           ) : (
             <span className="text-[10px] text-[#5B6678]">
@@ -407,7 +483,17 @@ export function EmailSyndicationStatusCard({
             </span>
           )}
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {dispatch?.preview_url && (
+              <a
+                href={dispatch.preview_url}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-md bg-white hover:bg-[#FFF4DC] border border-[#E5C98B] text-[#8A5A00] text-[11px] font-semibold flex items-center gap-1.5 transition"
+              >
+                <FlaskConical className="size-3.5" /> Open Ethereal Inbox <ExternalLink className="size-3" />
+              </a>
+            )}
             {dispatch?.email_html_preview && onPreview && (
               <button
                 type="button"
@@ -460,7 +546,6 @@ export function InstitutionalMailingListView({
   loading: boolean;
   retryingProposalId: number | null;
   onAddRecipient: (input: {
-    full_name: string;
     email: string;
     role: RecipientRole;
     department: string;
@@ -471,10 +556,9 @@ export function InstitutionalMailingListView({
   onPreviewDispatch: (dispatch: EmailDispatchRecord) => void;
   onRetryDispatch: (dispatch: EmailDispatchRecord) => Promise<void>;
 }) {
-  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<RecipientRole>("student");
-  const [department, setDepartment] = useState("");
+  const [department, setDepartment] = useState("All Departments");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
@@ -484,7 +568,9 @@ export function InstitutionalMailingListView({
 
   const activeStudents = recipients.filter((r) => r.is_active && r.role === "student").length;
   const activeFaculty = recipients.filter((r) => r.is_active && r.role === "faculty").length;
-  const activeStaff = recipients.filter((r) => r.is_active && r.role === "staff").length;
+  const activeOther = recipients.filter(
+    (r) => r.is_active && (r.role === "staff" || r.role === "all_campus")
+  ).length;
   const sentDispatchesCount = dispatches.filter((d) => d.status === "SENT").length;
 
   const filteredRecipients = recipients.filter((r) => {
@@ -492,9 +578,9 @@ export function InstitutionalMailingListView({
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
-      r.full_name.toLowerCase().includes(q) ||
       r.email.toLowerCase().includes(q) ||
-      r.department.toLowerCase().includes(q)
+      r.department.toLowerCase().includes(q) ||
+      formatRoleLabel(r.role).toLowerCase().includes(q)
     );
   });
 
@@ -502,24 +588,22 @@ export function InstitutionalMailingListView({
     e.preventDefault();
     setFormError("");
     setFormSuccess("");
-    if (!fullName.trim() || !email.trim()) {
-      setFormError("Full name and email address are required.");
+    if (!email.trim()) {
+      setFormError("Distribution email address is required.");
       return;
     }
     setSaving(true);
     try {
       await onAddRecipient({
-        full_name: fullName.trim(),
         email: email.trim().toLowerCase(),
         role,
-        department: department.trim() || "General",
+        department: department.trim() || "All Departments",
       });
-      setFullName("");
       setEmail("");
-      setDepartment("");
-      setFormSuccess("Recipient added to the institutional mailing list.");
+      setDepartment("All Departments");
+      setFormSuccess("Distribution list added to CampusSync institutional broadcasting.");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not add recipient.");
+      setFormError(err instanceof Error ? err.message : "Could not add distribution list.");
     } finally {
       setSaving(false);
     }
@@ -531,10 +615,10 @@ export function InstitutionalMailingListView({
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#DDE2EA] pb-4">
         <div>
           <h1 className="text-lg font-bold text-[#18212F] flex items-center gap-2">
-            <Mail className="size-4 text-[#24408E]" /> Institutional Mailing List &amp; Email Syndication
+            <Mail className="size-4 text-[#24408E]" /> Institutional Distribution Lists (Outlook / Campus Group Emails)
           </h1>
           <p className="text-xs text-[#5B6678] mt-0.5">
-            Manage active student, faculty, and staff addresses that automatically receive AI-formatted institutional announcements via private BCC batching once an approved event&apos;s survey is finalized.
+            Configure singular campus group aliases (such as <span className="font-mono text-[#18212F]">allstudents@apc.edu.ph</span> or <span className="font-mono text-[#18212F]">socit-students@apc.edu.ph</span>) that automatically receive AI-formatted event announcements via private BCC once an approved event&apos;s survey is finalized.
           </p>
         </div>
 
@@ -548,10 +632,14 @@ export function InstitutionalMailingListView({
                   : "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
               }`}
             >
-              <ShieldCheck className="size-3.5" />
+              {emailProvider.configured ? (
+                <ShieldCheck className="size-3.5" />
+              ) : (
+                <FlaskConical className="size-3.5" />
+              )}
               {emailProvider.configured
-                ? `Transport Ready (${emailProvider.provider.toUpperCase()})`
-                : "SMTP / Resend Setup Needed in Backend"}
+                ? `Live Delivery Active (${emailProvider.provider.toUpperCase()})`
+                : "Sandbox Preview Mode (Ethereal Relay)"}
             </span>
           )}
           <button
@@ -568,85 +656,84 @@ export function InstitutionalMailingListView({
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
-          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Active Students</div>
+          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Student Distribution Lists</div>
           <div className="text-2xl font-black text-[#24408E] mt-1">{activeStudents}</div>
-          <div className="text-[11px] text-[#5B6678]">Subscribed to event push</div>
+          <div className="text-[11px] text-[#5B6678]">Active student group aliases</div>
         </div>
         <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
-          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Active Faculty</div>
+          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Faculty Distribution Lists</div>
           <div className="text-2xl font-black text-[#24408E] mt-1">{activeFaculty}</div>
-          <div className="text-[11px] text-[#5B6678]">Department &amp; adviser list</div>
+          <div className="text-[11px] text-[#5B6678]">Active faculty &amp; adviser lists</div>
         </div>
         <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
-          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Active Staff</div>
-          <div className="text-2xl font-black text-[#18212F] mt-1">{activeStaff}</div>
-          <div className="text-[11px] text-[#5B6678]">Optional staff recipients</div>
+          <div className="text-[10px] font-mono uppercase text-[#5B6678]">Staff &amp; All-Campus Lists</div>
+          <div className="text-2xl font-black text-[#18212F] mt-1">{activeOther}</div>
+          <div className="text-[11px] text-[#5B6678]">Campus-wide &amp; staff aliases</div>
         </div>
         <div className="p-4 rounded-lg bg-white border border-[#B6DFC8] shadow-xs">
           <div className="text-[10px] font-mono uppercase text-[#5B6678]">Dispatched Announcements</div>
           <div className="text-2xl font-black text-[#1F7A4D] mt-1">{sentDispatchesCount}</div>
-          <div className="text-[11px] text-[#1F7A4D]/80">BCC-protected deliveries</div>
+          <div className="text-[11px] text-[#1F7A4D]/80">BCC-protected group pushes</div>
         </div>
       </div>
 
-      {/* Add Recipient Form + Directory Table */}
+      {/* Add Distribution List Form + Distribution Directory Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4 rounded-lg bg-white border border-[#C5D3F3] p-5 shadow-xs h-fit space-y-4">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-1.5">
-            <Plus className="size-4" /> Add Institutional Email
+            <Plus className="size-4" /> Add Distribution List Email
           </h2>
           <p className="text-[11px] text-[#5B6678]">
-            Add real student, faculty, or test inbox emails here for live syndication demos.
+            Enter a single campus/Outlook group alias or your test inbox email for live defense demos.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-[#18212F] block mb-1">Full Name *</label>
-              <input
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g., Juan Dela Cruz"
-                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
-              />
-            </div>
-
-            <div>
               <label className="text-xs font-semibold text-[#18212F] block mb-1">
-                Email Address *
+                Distribution Email Address *
               </label>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="student@apc.edu.ph or test@gmail.com"
-                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+                placeholder="allstudents@apc.edu.ph"
+                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs font-mono text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="text-xs font-semibold text-[#18212F] block mb-1">Role *</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as RecipientRole)}
-                  className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
-                >
-                  <option value="student">Student</option>
-                  <option value="faculty">Faculty</option>
-                  <option value="staff">Staff</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[#18212F] block mb-1">Department</label>
-                <input
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  placeholder="e.g., SoCIT"
-                  className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
-                />
-              </div>
+            <div>
+              <label className="text-xs font-semibold text-[#18212F] block mb-1">
+                Role / Audience *
+              </label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as RecipientRole)}
+                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
+              >
+                <option value="student">Students</option>
+                <option value="faculty">Faculty</option>
+                <option value="staff">Staff</option>
+                <option value="all_campus">All Campus</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-[#18212F] block mb-1">
+                Department *
+              </label>
+              <input
+                list="campussync-departments"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="All Departments, SoCIT, SoE, SoM, SoA..."
+                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+              />
+              <datalist id="campussync-departments">
+                {DEPARTMENT_SUGGESTIONS.map((dept) => (
+                  <option key={dept} value={dept} />
+                ))}
+              </datalist>
             </div>
 
             {formError && (
@@ -665,27 +752,27 @@ export function InstitutionalMailingListView({
               disabled={saving}
               className="w-full py-2.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <UserCheck className="size-3.5" />}
-              Add to Mailing List
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
+              Add Distribution List
             </button>
           </form>
         </div>
 
         <div className="lg:col-span-8 rounded-lg bg-white border border-[#DDE2EA] shadow-xs overflow-hidden flex flex-col">
           <div className="p-4 border-b border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 bg-[#F7F8FA]">
-            <div className="flex items-center gap-1 bg-white p-1 rounded-md border border-[#DDE2EA] text-[11px]">
-              {(["all", "student", "faculty", "staff"] as const).map((r) => (
+            <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-md border border-[#DDE2EA] text-[11px]">
+              {(["all", "student", "faculty", "staff", "all_campus"] as const).map((r) => (
                 <button
                   key={r}
                   type="button"
                   onClick={() => setRoleFilter(r)}
-                  className={`px-2.5 py-1 rounded font-semibold capitalize cursor-pointer transition ${
+                  className={`px-2.5 py-1 rounded font-semibold cursor-pointer transition ${
                     roleFilter === r
                       ? "bg-[#24408E] text-white"
                       : "text-[#5B6678] hover:text-[#18212F]"
                   }`}
                 >
-                  {r === "all" ? `All (${recipients.length})` : r}
+                  {r === "all" ? `All (${recipients.length})` : formatRoleLabel(r)}
                 </button>
               ))}
             </div>
@@ -695,7 +782,7 @@ export function InstitutionalMailingListView({
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Filter name, email, dept..."
+                placeholder="Filter email or dept..."
                 className="w-full pl-8 pr-3 py-1.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
               />
             </div>
@@ -704,31 +791,30 @@ export function InstitutionalMailingListView({
           {filteredRecipients.length === 0 ? (
             <div className="p-10 text-center text-xs text-[#5B6678] space-y-1.5">
               <Users className="size-8 mx-auto text-[#24408E]/30" />
-              <p className="font-semibold text-[#18212F]">No matching institutional recipients</p>
-              <p>Add student or faculty email addresses using the form on the left.</p>
+              <p className="font-semibold text-[#18212F]">No matching distribution lists</p>
+              <p>Add an institutional group email alias using the form on the left.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-[#F7F8FA] border-b border-[#DDE2EA] text-[10px] font-mono font-semibold text-[#24408E] uppercase">
-                    <th className="p-3">Recipient</th>
-                    <th className="p-3">Role</th>
+                    <th className="p-3">Distribution Email Address</th>
+                    <th className="p-3">Role / Audience</th>
                     <th className="p-3">Department</th>
                     <th className="p-3">Status</th>
-                    <th className="p-3 text-right">Actions</th>
+                    <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#DDE2EA]">
                   {filteredRecipients.map((rec) => (
                     <tr key={rec.id} className="hover:bg-[#F7F8FA] transition-colors">
-                      <td className="p-3">
-                        <div className="font-semibold text-[#18212F]">{rec.full_name}</div>
-                        <div className="text-[11px] text-[#5B6678] font-mono">{rec.email}</div>
+                      <td className="p-3 font-mono font-semibold text-[#18212F]">
+                        {rec.email}
                       </td>
                       <td className="p-3">
-                        <span className="px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold capitalize">
-                          {rec.role}
+                        <span className="px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
+                          {formatRoleLabel(rec.role)}
                         </span>
                       </td>
                       <td className="p-3 text-[#4B5563]">{rec.department}</td>
@@ -748,7 +834,7 @@ export function InstitutionalMailingListView({
                       <td className="p-3 text-right">
                         <button
                           type="button"
-                          title="Remove recipient"
+                          title="Remove distribution list"
                           onClick={() => void onDeleteRecipient(rec.id)}
                           className="p-1.5 rounded text-[#5B6678] hover:text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
                         >
@@ -785,75 +871,93 @@ export function InstitutionalMailingListView({
               <thead>
                 <tr className="bg-[#F7F8FA] border-b border-[#DDE2EA] text-[10px] font-mono font-semibold text-[#24408E] uppercase">
                   <th className="p-3">Event / Subject</th>
-                  <th className="p-3">Audience</th>
+                  <th className="p-3">Target Distribution Lists</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Timestamp</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#DDE2EA]">
-                {dispatches.map((d) => (
-                  <tr key={d.id} className="hover:bg-[#F7F8FA]">
-                    <td className="p-3">
-                      <div className="font-semibold text-[#18212F]">
-                        {eventTitleMap[d.proposal_id] || `Event #${d.proposal_id}`}
-                      </div>
-                      <div className="text-[11px] text-[#5B6678] truncate max-w-md">
-                        {d.email_subject || d.error_message || "Generating digest..."}
-                      </div>
-                    </td>
-                    <td className="p-3 text-[#4B5563]">
-                      <div>{formatTargetGroupLabel(d.target_groups)}</div>
-                      <div className="text-[10px] font-mono text-[#5B6678]">
-                        {d.recipient_count} recipient{d.recipient_count === 1 ? "" : "s"}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                          d.status === "SENT"
-                            ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
-                            : d.status === "FAILED"
-                            ? "bg-[#FBEDEC] text-[#B3261E] border-[#E2B3AF]"
-                            : "bg-[#EAEFFA] text-[#24408E] border-[#C5D3F3]"
-                        }`}
-                      >
-                        {d.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-[11px] text-[#5B6678]">
-                      {new Date(d.sent_at || d.updated_at || d.created_at).toLocaleString()}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        {d.email_html_preview && (
-                          <button
-                            type="button"
-                            onClick={() => onPreviewDispatch(d)}
-                            className="px-2.5 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                {dispatches.map((d) => {
+                  const isSandbox =
+                    d.delivery_provider === "sandbox" || Boolean(d.preview_url);
+                  return (
+                    <tr key={d.id} className="hover:bg-[#F7F8FA]">
+                      <td className="p-3">
+                        <div className="font-semibold text-[#18212F]">
+                          {eventTitleMap[d.proposal_id] || `Event #${d.proposal_id}`}
+                        </div>
+                        <div className="text-[11px] text-[#5B6678] truncate max-w-md">
+                          {d.email_subject || d.error_message || "Generating digest..."}
+                        </div>
+                      </td>
+                      <td className="p-3 text-[#4B5563]">
+                        <div>{formatTargetGroupLabel(d.target_groups)}</div>
+                        <div className="text-[10px] font-mono text-[#5B6678]">
+                          {d.recipient_count} distribution list{d.recipient_count === 1 ? "" : "s"}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              d.status === "SENT"
+                                ? isSandbox
+                                  ? "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
+                                  : "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
+                                : d.status === "FAILED"
+                                ? "bg-[#FBEDEC] text-[#B3261E] border-[#E2B3AF]"
+                                : "bg-[#EAEFFA] text-[#24408E] border-[#C5D3F3]"
+                            }`}
                           >
-                            <Eye className="size-3" /> Preview
-                          </button>
-                        )}
-                        {d.status === "FAILED" && (
-                          <button
-                            type="button"
-                            disabled={retryingProposalId === d.proposal_id}
-                            onClick={() => void onRetryDispatch(d)}
-                            className="px-2.5 py-1 rounded bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[10px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                          >
-                            {retryingProposalId === d.proposal_id ? (
-                              <Loader2 className="size-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="size-3" />
-                            )}
-                            Retry
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                            {d.status === "SENT" && isSandbox ? "SANDBOX SENT" : d.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-[11px] text-[#5B6678]">
+                        {new Date(d.sent_at || d.updated_at || d.created_at).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          {d.preview_url && (
+                            <a
+                              href={d.preview_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 rounded bg-[#FFF4DC] hover:bg-[#FCE8BA] border border-[#E5C98B] text-[#8A5A00] text-[10px] font-semibold flex items-center gap-1"
+                            >
+                              Ethereal <ExternalLink className="size-3" />
+                            </a>
+                          )}
+                          {d.email_html_preview && (
+                            <button
+                              type="button"
+                              onClick={() => onPreviewDispatch(d)}
+                              className="px-2.5 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="size-3" /> Preview
+                            </button>
+                          )}
+                          {d.status === "FAILED" && (
+                            <button
+                              type="button"
+                              disabled={retryingProposalId === d.proposal_id}
+                              onClick={() => void onRetryDispatch(d)}
+                              className="px-2.5 py-1 rounded bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[10px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              {retryingProposalId === d.proposal_id ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <RefreshCw className="size-3" />
+                              )}
+                              Retry
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
