@@ -1,5 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, ExternalLink, Eye, EyeOff, Menu, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileCheck2,
+  Loader2,
+  Menu,
+  Paperclip,
+  PenTool,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -11,6 +30,25 @@ import {
   YAxis,
 } from "recharts";
 import { supabase } from "../../lib/supabase";
+import {
+  aiLocalCache,
+  analyzeAiSurveyFeedback,
+  deriveAuditStatus,
+  fetchEventDocuments,
+  runBatchProposalTriage,
+  runDocumentPreScreen,
+  runProposalTriage,
+  type PreScreenResult,
+  type StoredEventDocumentMeta,
+  type SurveyDiagnosticsResult,
+  type SurveyResponseEntry,
+  type TriageResult,
+} from "../../lib/aiClient";
+import {
+  carriedAttachmentToBlobUrl,
+  carriedAttachmentToFile,
+  decodeProposalDescription,
+} from "../../lib/proposalAttachments";
 
 // Point this at your published privacy notice (the sign-up form collects name and email).
 const PRIVACY_URL = "/privacy";
@@ -36,12 +74,21 @@ export interface EventRecord {
   venue: string;
   description: string;
   status: "pending" | "approved" | "revision" | "needs_revision" | "completed" | "rejected";
+  urgency_tier?: "P1" | "P2" | "P3";
   admin_feedback?: string;
   external_registration_link?: string;
   registration_link?: string;
   proposed_attendees?: number;
   accepted_attendees?: number;
-  precheck?: Precheck; // render only when the backend supplies a real result
+  estimated_budget?: number;
+  has_external_guests?: boolean;
+  document_bucket?: string;
+  document_path?: string;
+  waiver_path?: string;
+  precheck?: Precheck; // legacy pre-check shape
+  ai_prescreen_result?: PreScreenResult;
+  ai_triage_result?: TriageResult;
+  ai_feedback_analysis?: SurveyDiagnosticsResult;
 }
 
 type QuestionType = "rating" | "text" | "yes_no";
@@ -62,6 +109,8 @@ interface EventSurvey {
   targetAudience: number;
   avgSatisfaction: number;
   summary?: string;
+  sampleResponses?: SurveyResponseEntry[];
+  aiDiagnostics?: SurveyDiagnosticsResult;
   questions: SurveyQuestion[];
 }
 
@@ -817,6 +866,31 @@ export function DepartmentHeadInterface({
 
 type Tier = "ALL" | "P1" | "P2" | "P3";
 
+function tierMeta(tier: "P1" | "P2" | "P3") {
+  if (tier === "P1") {
+    return {
+      tier: "P1" as const,
+      label: "P1 High",
+      color: "text-[#B3261E]",
+      badgeCls: "bg-[#FBEDEC] text-[#B3261E] border border-[#E2B3AF]",
+    };
+  }
+  if (tier === "P2") {
+    return {
+      tier: "P2" as const,
+      label: "P2 Medium",
+      color: "text-[#8A5A00]",
+      badgeCls: "bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B]",
+    };
+  }
+  return {
+    tier: "P3" as const,
+    label: "P3 Standard",
+    color: "text-[#5B6678]",
+    badgeCls: "bg-[#F2F4F7] text-[#5B6678] border border-[#DDE2EA]",
+  };
+}
+
 function ProposalApprovalsView({
   events,
   setEvents,
@@ -831,29 +905,265 @@ function ProposalApprovalsView({
   onRefresh: () => Promise<void>;
 }) {
   const [tier, setTier] = useState<Tier>("ALL");
+  const [statusFilter, setStatusFilter] = useState<"PENDING" | "ALL">("PENDING");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<null | "revision" | "reject">(null);
   const [note, setNote] = useState("");
 
+  // AI Triage state
+  const [triageMap, setTriageMap] = useState<Record<string, TriageResult>>(() =>
+    aiLocalCache.getTriages()
+  );
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError, setTriageError] = useState("");
+  const [expandedTriageIds, setExpandedTriageIds] = useState<Record<number, boolean>>({});
+
+  // AI Multimodal Pre-Screening state
+  const [preScreenMap, setPreScreenMap] = useState<Record<string, PreScreenResult>>(() =>
+    aiLocalCache.getPreScreens()
+  );
+  const [preScreenLoading, setPreScreenLoading] = useState(false);
+  const [preScreenError, setPreScreenError] = useState("");
+
+  const pendingOnly = useMemo(
+    () => events.filter((e) => (e.status || "pending").toLowerCase().trim() === "pending"),
+    [events]
+  );
+
   const queue = useMemo(
     () =>
-      events
-        .map((e) => ({ ...e, u: urgencyOf(e.event_date) }))
+      (statusFilter === "PENDING" ? pendingOnly : events)
+        .map((e) => {
+          const aiTriage = e.ai_triage_result || triageMap[String(e.event_id)];
+          const effectiveTier =
+            aiTriage?.priorityTier || e.urgency_tier || urgencyOf(e.event_date).tier;
+          return {
+            ...e,
+            aiTriage,
+            u: tierMeta(effectiveTier),
+          };
+        })
         .filter((e) => tier === "ALL" || e.u.tier === tier)
         .sort(
           (a, b) =>
             Number(b.status === "pending") - Number(a.status === "pending") ||
             a.u.tier.localeCompare(b.u.tier) ||
+            (b.aiTriage?.complexityScore || 0) - (a.aiTriage?.complexityScore || 0) ||
             new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
         ),
-    [events, tier]
+    [events, pendingOnly, statusFilter, tier, triageMap]
   );
 
   const selected = queue.find((e) => e.event_id === selectedId) ?? queue[0] ?? null;
+  const decodedSelected = decodeProposalDescription(selected?.description);
+  const selectedCarriedFiles = decodedSelected.files;
   const link = selected?.external_registration_link || selected?.registration_link;
   const pc = selected?.precheck;
+  const aiPreScreen = selected
+    ? selected.ai_prescreen_result ||
+      decodedSelected.preScreen ||
+      preScreenMap[String(selected.event_id)]
+    : undefined;
+  const selectedTriage = selected?.aiTriage;
+
+  const persistOptionalFields = async (eventId: number, fields: Record<string, unknown>) => {
+    if (usingSample) return;
+    try {
+      const { error: dbErr } = await supabase
+        .from("events")
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq("event_id", eventId);
+      if (dbErr) {
+        console.warn("Optional Supabase AI column update skipped:", dbErr.message);
+      }
+    } catch {
+      // Gracefully keep in local state/cache
+    }
+  };
+
+  const handleBatchAiTriage = async () => {
+    if (events.length === 0) return;
+    setTriageLoading(true);
+    setTriageError("");
+    try {
+      const results = await runBatchProposalTriage(
+        events.map((ev) => ({
+          eventId: ev.event_id,
+          title: ev.title,
+          organization: ev.organization,
+          eventDate: ev.event_date,
+          venue: ev.venue,
+          description: ev.description,
+          expectedCrowdSize: ev.proposed_attendees,
+          budget: ev.estimated_budget,
+          hasExternalGuests: ev.has_external_guests,
+        }))
+      );
+      const next = { ...triageMap };
+      for (const item of results) {
+        const t: TriageResult = {
+          priorityTier: item.priorityTier,
+          complexityScore: item.complexityScore,
+          riskFlags: item.riskFlags,
+          rationale: item.rationale,
+        };
+        next[String(item.eventId)] = t;
+        aiLocalCache.saveTriage(item.eventId, t);
+        void persistOptionalFields(item.eventId, {
+          urgency_tier: item.priorityTier,
+          ai_triage_result: t,
+        });
+      }
+      setTriageMap(next);
+    } catch (err) {
+      setTriageError(err instanceof Error ? err.message : "AI Queue Triage failed.");
+    } finally {
+      setTriageLoading(false);
+    }
+  };
+
+  const handleSingleAiTriage = async (ev: EventRecord) => {
+    setTriageLoading(true);
+    setTriageError("");
+    try {
+      const res = await runProposalTriage({
+        eventId: ev.event_id,
+        title: ev.title,
+        organization: ev.organization,
+        eventDate: ev.event_date,
+        venue: ev.venue,
+        description: ev.description,
+        expectedCrowdSize: ev.proposed_attendees,
+        budget: ev.estimated_budget,
+        hasExternalGuests: ev.has_external_guests,
+      });
+      aiLocalCache.saveTriage(ev.event_id, res);
+      setTriageMap((prev) => ({ ...prev, [String(ev.event_id)]: res }));
+      await persistOptionalFields(ev.event_id, {
+        urgency_tier: res.priorityTier,
+        ai_triage_result: res,
+      });
+    } catch (err) {
+      setTriageError(err instanceof Error ? err.message : "AI Triage failed.");
+    } finally {
+      setTriageLoading(false);
+    }
+  };
+
+  const [attachedFilesByEvent, setAttachedFilesByEvent] = useState<
+    Record<number, { file: File; previewUrl: string }>
+  >({});
+  const [remoteDocsByEvent, setRemoteDocsByEvent] = useState<
+    Record<number, StoredEventDocumentMeta[]>
+  >({});
+
+  const selectedAttachedLocal = selected
+    ? attachedFilesByEvent[selected.event_id]
+    : undefined;
+  const selectedRemoteDocs = selected
+    ? remoteDocsByEvent[selected.event_id] || []
+    : [];
+
+  useEffect(() => {
+    const evId = selected?.event_id;
+    if (!evId) return;
+    let cancelled = false;
+    setPreScreenError("");
+    void fetchEventDocuments(evId).then((payload) => {
+      if (cancelled || !payload) return;
+      if (payload.documents.length > 0) {
+        setRemoteDocsByEvent((prev) => ({ ...prev, [evId]: payload.documents }));
+      }
+      if (payload.preScreenResult) {
+        aiLocalCache.savePreScreen(evId, payload.preScreenResult);
+        setPreScreenMap((prev) => ({
+          ...prev,
+          [String(evId)]: payload.preScreenResult as PreScreenResult,
+        }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.event_id]);
+
+  const handleAttachLocalDoc = (ev: EventRecord, file: File) => {
+    setAttachedFilesByEvent((prev) => {
+      const old = prev[ev.event_id];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      return {
+        ...prev,
+        [ev.event_id]: { file, previewUrl: URL.createObjectURL(file) },
+      };
+    });
+    setPreScreenError("");
+  };
+
+  const handleRemoveLocalDoc = (eventId: number) => {
+    setAttachedFilesByEvent((prev) => {
+      const next = { ...prev };
+      if (next[eventId]?.previewUrl) URL.revokeObjectURL(next[eventId].previewUrl);
+      delete next[eventId];
+      return next;
+    });
+  };
+
+  const handleInspectDocument = async (ev: EventRecord, file?: File) => {
+    if (file) {
+      handleAttachLocalDoc(ev, file);
+    }
+
+    const decoded = decodeProposalDescription(ev.description);
+    const carriedFileObjects = decoded.files
+      .map((att) => carriedAttachmentToFile(att))
+      .filter((f): f is File => Boolean(f));
+
+    const localOverride = file ?? attachedFilesByEvent[ev.event_id]?.file;
+    const filesToSend = localOverride ? [localOverride] : carriedFileObjects;
+
+    setPreScreenLoading(true);
+    setPreScreenError("");
+    try {
+      const storageDocuments =
+        filesToSend.length === 0 && ev.document_path
+          ? [
+              { bucket: ev.document_bucket, path: ev.document_path },
+              ...(ev.waiver_path ? [{ bucket: ev.document_bucket, path: ev.waiver_path }] : []),
+            ]
+          : [];
+      const result = await runDocumentPreScreen({
+        files: filesToSend,
+        storageDocuments,
+        eventId: ev.event_id,
+        metadata: {
+          title: ev.title,
+          organization: ev.organization,
+          eventDate: ev.event_date,
+          startTime: ev.start_time,
+          endTime: ev.end_time,
+          venue: ev.venue,
+          description: decoded.cleanDescription,
+          budget: ev.estimated_budget,
+          expectedAttendees: ev.proposed_attendees,
+          hasExternalGuests: ev.has_external_guests,
+        },
+      });
+      aiLocalCache.savePreScreen(ev.event_id, result);
+      setPreScreenMap((prev) => ({ ...prev, [String(ev.event_id)]: result }));
+      await persistOptionalFields(ev.event_id, { ai_prescreen_result: result });
+
+      const remotePayload = await fetchEventDocuments(ev.event_id);
+      if (remotePayload && remotePayload.documents.length > 0) {
+        setRemoteDocsByEvent((prev) => ({ ...prev, [ev.event_id]: remotePayload.documents }));
+      }
+    } catch (err) {
+      setPreScreenError(err instanceof Error ? err.message : "AI document inspection failed.");
+    } finally {
+      setPreScreenLoading(false);
+    }
+  };
 
   const decide = async (status: "approved" | "rejected" | "needs_revision", feedback?: string) => {
     if (!selected) return;
@@ -882,6 +1192,9 @@ function ProposalApprovalsView({
       await onRefresh();
     }
 
+    if (statusFilter === "PENDING") {
+      setSelectedId(null);
+    }
     setDialog(null);
     setNote("");
     setSaving(false);
@@ -897,25 +1210,81 @@ function ProposalApprovalsView({
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <section
         aria-label="Proposal queue"
-        className="flex shrink-0 flex-col border-b border-[#DDE2EA] bg-white max-md:max-h-60 md:w-80 md:border-b-0 md:border-r"
+        className="flex shrink-0 flex-col border-b border-[#DDE2EA] bg-white max-md:max-h-72 md:w-84 md:border-b-0 md:border-r"
       >
         <div className="space-y-3 border-b border-[#DDE2EA] p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div>
               <h1 className="font-serif text-lg font-semibold">Proposals</h1>
-              <p className="text-xs text-[#5B6678]">
-                {queue.length} shown
-              </p>
+              <p className="text-xs text-[#5B6678]">{queue.length} sorted by priority</p>
             </div>
-            <button
-              type="button"
-              aria-label="Refresh proposals"
-              onClick={onRefresh}
-              className={`rounded p-1.5 text-[#5B6678] hover:bg-[#F2F4F7] cursor-pointer ${focusRing}`}
-            >
-              <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <div className="flex rounded-md border border-[#DDE2EA] bg-[#F2F4F7] p-0.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter("PENDING");
+                    setSelectedId(null);
+                  }}
+                  className={`rounded px-2 py-0.5 font-medium cursor-pointer ${
+                    statusFilter === "PENDING"
+                      ? "bg-[#24408E] text-white"
+                      : "text-[#5B6678] hover:text-[#18212F]"
+                  }`}
+                >
+                  Pending ({pendingOnly.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter("ALL");
+                    setSelectedId(null);
+                  }}
+                  className={`rounded px-2 py-0.5 font-medium cursor-pointer ${
+                    statusFilter === "ALL"
+                      ? "bg-[#24408E] text-white"
+                      : "text-[#5B6678] hover:text-[#18212F]"
+                  }`}
+                >
+                  All ({events.length})
+                </button>
+              </div>
+              <button
+                type="button"
+                aria-label="Refresh proposals"
+                onClick={onRefresh}
+                className={`rounded p-1.5 text-[#5B6678] hover:bg-[#F2F4F7] cursor-pointer ${focusRing}`}
+              >
+                <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
+
+          <button
+            type="button"
+            disabled={triageLoading || events.length === 0}
+            onClick={handleBatchAiTriage}
+            className={`${btnOutline} w-full py-1.5 text-xs text-[#24408E] border-[#24408E]/30 bg-[#EAEFFA]/50 hover:bg-[#EAEFFA]`}
+          >
+            {triageLoading ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                Triaging queue with AI…
+              </>
+            ) : (
+              <>
+                <Sparkles className="size-3.5" aria-hidden="true" />
+                AI Priority Triage Queue
+              </>
+            )}
+          </button>
+
+          {triageError && (
+            <p role="alert" className="rounded bg-[#FBEDEC] px-2.5 py-1.5 text-xs text-[#B3261E]">
+              {triageError}
+            </p>
+          )}
+
           <div className="flex gap-1" role="group" aria-label="Filter by urgency">
             {(["ALL", "P1", "P2", "P3"] as const).map((t) => (
               <button
@@ -942,13 +1311,21 @@ function ProposalApprovalsView({
             ))}
           {queue.map((item) => {
             const isSel = selected?.event_id === item.event_id;
+            const isTriageOpen = Boolean(expandedTriageIds[item.event_id]);
             return (
-              <li key={item.event_id}>
-                <button
-                  type="button"
+              <li key={item.event_id} className="border-b border-[#DDE2EA]">
+                <div
+                  role="button"
+                  tabIndex={0}
                   aria-current={isSel}
                   onClick={() => setSelectedId(item.event_id)}
-                  className={`w-full border-b border-[#DDE2EA] px-4 py-3 text-left cursor-pointer ${focusRing} ${
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedId(item.event_id);
+                    }
+                  }}
+                  className={`w-full px-4 py-3 text-left cursor-pointer ${focusRing} ${
                     isSel ? "bg-[#EAEFFA] shadow-[inset_3px_0_0_#24408E]" : "hover:bg-[#F7F8FA]"
                   }`}
                 >
@@ -957,16 +1334,65 @@ function ProposalApprovalsView({
                     <StatusBadge status={item.status} />
                   </div>
                   <p className="mt-0.5 truncate text-xs text-[#5B6678]">{item.organization}</p>
-                  <div className="mt-1.5 flex items-center justify-between text-xs text-[#5B6678]">
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-[#5B6678]">
                     <span>{formatDate(item.event_date)}</span>
-                    {item.status === "pending" && (
-                      <span>
-                        <span className={`font-medium ${item.u.color}`}>{item.u.label}</span>{" "}
-                        {leadTime(item.event_date)}
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        title={
+                          item.aiTriage
+                            ? `AI Triage (${item.aiTriage.priorityTier}, Complexity ${item.aiTriage.complexityScore}/10): ${item.aiTriage.rationale}`
+                            : "Lead-time urgency estimate"
+                        }
+                        className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${item.u.badgeCls}`}
+                      >
+                        {item.aiTriage
+                          ? `${item.aiTriage.priorityTier} · C${item.aiTriage.complexityScore}`
+                          : item.u.label}
                       </span>
-                    )}
+                      <span>{leadTime(item.event_date)}</span>
+                    </span>
                   </div>
-                </button>
+
+                  {item.aiTriage && (
+                    <div className="mt-2 border-t border-[#DDE2EA]/80 pt-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedTriageIds((prev) => ({
+                            ...prev,
+                            [item.event_id]: !prev[item.event_id],
+                          }));
+                        }}
+                        className="flex w-full items-center justify-between text-[11px] font-medium text-[#24408E] hover:underline cursor-pointer"
+                      >
+                        <span>AI triage rationale</span>
+                        {isTriageOpen ? (
+                          <ChevronUp className="size-3.5" />
+                        ) : (
+                          <ChevronDown className="size-3.5" />
+                        )}
+                      </button>
+                      {isTriageOpen && (
+                        <div className="mt-1.5 space-y-1.5 rounded bg-white p-2 text-xs text-[#18212F] border border-[#DDE2EA]">
+                          <p className="leading-relaxed">{item.aiTriage.rationale}</p>
+                          {item.aiTriage.riskFlags.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {item.aiTriage.riskFlags.map((flag, i) => (
+                                <span
+                                  key={i}
+                                  className="rounded bg-[#FBEDEC] px-1.5 py-0.5 text-[10px] font-medium text-[#B3261E]"
+                                >
+                                  {flag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -975,14 +1401,60 @@ function ProposalApprovalsView({
 
       {selected ? (
         <article className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex-1 space-y-8 p-6 md:p-8">
-            <header>
-              <div className="flex flex-wrap items-center gap-3">
-                <h2 className="font-serif text-2xl font-semibold">{selected.title}</h2>
-                <StatusBadge status={selected.status} />
+          <div className="flex-1 space-y-7 p-6 md:p-8">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h2 className="font-serif text-2xl font-semibold">{selected.title}</h2>
+                  <StatusBadge status={selected.status} />
+                  <span className={`rounded px-2 py-0.5 text-xs font-medium ${selected.u.badgeCls}`}>
+                    {selectedTriage
+                      ? `${selectedTriage.priorityTier} · Complexity ${selectedTriage.complexityScore}/10`
+                      : selected.u.label}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-[#5B6678]">{selected.organization}</p>
               </div>
-              <p className="mt-1 text-sm text-[#5B6678]">{selected.organization}</p>
+              <button
+                type="button"
+                disabled={triageLoading}
+                onClick={() => handleSingleAiTriage(selected)}
+                className={btnOutline}
+              >
+                {triageLoading ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Sparkles className="size-4 text-[#24408E]" aria-hidden="true" />
+                )}
+                AI Triage
+              </button>
             </header>
+
+            {selectedTriage && (
+              <section className="rounded-md border border-[#DDE2EA] bg-white p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[#24408E] flex items-center gap-1.5">
+                    <Sparkles className="size-3.5" aria-hidden="true" /> AI Priority Queue Triage
+                  </h3>
+                  <span className="text-xs font-medium text-[#5B6678]">
+                    Complexity: <strong className="text-[#18212F]">{selectedTriage.complexityScore} / 10</strong>
+                  </span>
+                </div>
+                <p className="text-sm leading-relaxed text-[#18212F]">{selectedTriage.rationale}</p>
+                {selectedTriage.riskFlags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {selectedTriage.riskFlags.map((flag, idx) => (
+                      <span
+                        key={idx}
+                        className="rounded bg-[#FBEDEC] px-2 py-0.5 text-xs font-medium text-[#B3261E]"
+                      >
+                        {flag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
             <dl className="grid grid-cols-1 gap-4 border-y border-[#DDE2EA] py-4 sm:grid-cols-3">
               {[
@@ -997,9 +1469,311 @@ function ProposalApprovalsView({
               ))}
             </dl>
 
-            <section>
-              <h3 className="mb-2 text-sm font-semibold">Pre-check</h3>
-              {pc ? (
+            {/* Multimodal AI Document & Visual Signature Pre-Screening */}
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                  <FileCheck2 className="size-4 text-[#24408E]" aria-hidden="true" />
+                  AI Document & Signature Pre-Screening
+                </h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(selected.document_path ||
+                    selectedRemoteDocs.length > 0 ||
+                    selectedCarriedFiles.length > 0 ||
+                    selectedAttachedLocal) && (
+                    <button
+                      type="button"
+                      disabled={preScreenLoading}
+                      onClick={() => handleInspectDocument(selected)}
+                      className={`${btnOutline} py-1 text-xs`}
+                    >
+                      {preScreenLoading ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Sparkles className="size-3.5 text-[#24408E]" aria-hidden="true" />
+                      )}
+                      {preScreenLoading ? "Inspecting…" : "Run AI Check on Attached PDF"}
+                    </button>
+                  )}
+                  <label className={`${btnOutline} py-1 text-xs`}>
+                    <Upload className="size-3.5 text-[#24408E]" aria-hidden="true" />
+                    {selectedAttachedLocal ? "Replace PDF / Image" : "Attach & Inspect PDF / Image"}
+                    <input
+                      type="file"
+                      accept=".pdf,image/png,image/jpeg"
+                      className="hidden"
+                      disabled={preScreenLoading}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleInspectDocument(selected, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {(selectedAttachedLocal ||
+                selectedCarriedFiles.length > 0 ||
+                selectedRemoteDocs.length > 0 ||
+                selected.document_path) && (
+                <div className="rounded-md border border-[#DDE2EA] bg-white p-3 space-y-2 text-xs">
+                  <p className="font-semibold text-[#5B6678] uppercase tracking-wide text-[11px]">
+                    Attached proposal document(s)
+                  </p>
+                  {selectedCarriedFiles.map((att, idx) => (
+                    <div
+                      key={`carried-${idx}-${att.name}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded bg-[#EAEFFA]/60 px-2.5 py-2 border border-[#DDE2EA]"
+                    >
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
+                        <span className="font-medium text-[#18212F] truncate">{att.name}</span>
+                        <span className="text-[#1F7A4D] shrink-0">
+                          ({Math.max(1, Math.round(att.size / 1024))} KB · Sent by Facilitator)
+                        </span>
+                      </span>
+                      {att.tooLargeForInline && !att.storageUrl ? (
+                        <span className="text-[#8A5A00] shrink-0">
+                          Over 3 MB — attach locally to inspect
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = carriedAttachmentToBlobUrl(att);
+                            if (url) window.open(url, "_blank", "noopener,noreferrer");
+                          }}
+                          className="text-[#24408E] underline flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          View PDF <ExternalLink className="size-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {selectedAttachedLocal && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-[#F7F8FA] px-2.5 py-2 border border-[#DDE2EA]">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
+                        <span className="font-medium text-[#18212F] truncate">
+                          {selectedAttachedLocal.file.name}
+                        </span>
+                        <span className="text-[#5B6678] shrink-0">
+                          ({Math.max(1, Math.round(selectedAttachedLocal.file.size / 1024))} KB)
+                        </span>
+                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={selectedAttachedLocal.previewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#24408E] underline flex items-center gap-1"
+                        >
+                          View <ExternalLink className="size-3" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLocalDoc(selected.event_id)}
+                          aria-label="Remove local attachment"
+                          className="rounded p-1 text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {selectedCarriedFiles.length === 0 &&
+                    selectedRemoteDocs.map((doc) => (
+                      <div
+                        key={`${doc.index}-${doc.filename}`}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded bg-[#EAEFFA]/50 px-2.5 py-2 border border-[#DDE2EA]"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
+                          <span className="font-medium text-[#18212F] truncate">{doc.filename}</span>
+                          <span className="text-[#5B6678] shrink-0">
+                            ({Math.max(1, Math.round(doc.size / 1024))} KB · Sent by Facilitator)
+                          </span>
+                        </span>
+                        <a
+                          href={doc.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#24408E] underline flex items-center gap-1 shrink-0"
+                        >
+                          View PDF <ExternalLink className="size-3" />
+                        </a>
+                      </div>
+                    ))}
+                  {selected.document_path &&
+                    selectedCarriedFiles.length === 0 &&
+                    selectedRemoteDocs.length === 0 && (
+                      <div className="flex items-center justify-between gap-2 rounded bg-[#F7F8FA] px-2.5 py-2 border border-[#DDE2EA]">
+                        <span className="truncate font-mono text-[11px] text-[#18212F]">
+                          {selected.document_path}
+                        </span>
+                        <span className="text-[#1F7A4D] font-medium shrink-0">Supabase Storage</span>
+                      </div>
+                    )}
+                </div>
+              )}
+
+              {preScreenError && (
+                <div
+                  role="alert"
+                  className="rounded-md bg-[#FBEDEC] border border-[#E2B3AF] px-3 py-2.5 text-sm text-[#B3261E] flex items-center justify-between gap-2"
+                >
+                  <p>{preScreenError}</p>
+                  {(selectedAttachedLocal || selectedCarriedFiles.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => handleInspectDocument(selected)}
+                      className={`${btnOutline} py-1 text-xs shrink-0`}
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {aiPreScreen ? (
+                <div className="space-y-3 rounded-md border border-[#DDE2EA] bg-white p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
+                    <span
+                      className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
+                        deriveAuditStatus(aiPreScreen) === "COMPLETE"
+                          ? "bg-[#E6F3EC] text-[#1F7A4D]"
+                          : "bg-[#FBEDEC] text-[#B3261E]"
+                      }`}
+                    >
+                      {deriveAuditStatus(aiPreScreen) === "COMPLETE"
+                        ? "Complete & Verified"
+                        : "Defective / Needs Attention"}
+                    </span>
+                    <span className="text-xs font-medium text-[#5B6678]">
+                      Completeness score:{" "}
+                      <strong className="text-[#18212F]">{aiPreScreen.completenessScore} / 100</strong>
+                    </span>
+                  </div>
+
+                  {aiPreScreen.eventSummary && (
+                    <div className="rounded-md bg-[#F7F9FF] border border-[#C5D3F3] p-3.5 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#24408E]">
+                        AI Event Summary
+                      </p>
+                      <p className="font-semibold text-[#18212F]">
+                        {aiPreScreen.eventSummary.headline}
+                      </p>
+                      <p className="text-xs text-[#374151] leading-relaxed">
+                        {aiPreScreen.eventSummary.overview}
+                      </p>
+                      {aiPreScreen.eventSummary.keyHighlights?.length > 0 && (
+                        <ul className="space-y-1 pt-1 border-t border-[#DDE6FA] text-xs text-[#18212F]">
+                          {aiPreScreen.eventSummary.keyHighlights.map((pt, i) => (
+                            <li key={i} className="flex items-start gap-1.5">
+                              <span className="text-[#24408E] font-bold">•</span>
+                              <span>{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Signature Verification */}
+                  <div className="rounded-md bg-[#F7F8FA] p-3 space-y-2 border border-[#DDE2EA]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-[#18212F] flex items-center gap-1.5">
+                        <PenTool className="size-3.5 text-[#24408E]" aria-hidden="true" />
+                        Visual Signature Verification
+                      </span>
+                      <span
+                        className={`text-xs font-semibold ${
+                          aiPreScreen.signatureCheck.signaturesDetected
+                            ? "text-[#1F7A4D]"
+                            : "text-[#B3261E]"
+                        }`}
+                      >
+                        {aiPreScreen.signatureCheck.signaturesDetected
+                          ? "Signatures detected"
+                          : "No signatures detected"}
+                      </span>
+                    </div>
+
+                    {aiPreScreen.signatureCheck.detectedSignatories.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {aiPreScreen.signatureCheck.detectedSignatories.map((sig, i) => (
+                          <span
+                            key={i}
+                            className="rounded bg-[#E6F3EC] px-2 py-0.5 text-xs font-medium text-[#1F7A4D]"
+                          >
+                            {sig}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {aiPreScreen.signatureCheck.missingSignatureLines.length > 0 && (
+                      <div className="rounded bg-[#FBEDEC] p-2.5 text-xs text-[#B3261E]">
+                        <p className="font-semibold mb-1">Missing / blank signature lines:</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {aiPreScreen.signatureCheck.missingSignatureLines.map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {aiPreScreen.signatureCheck.visualNotes && (
+                      <p className="text-xs text-[#5B6678]">{aiPreScreen.signatureCheck.visualNotes}</p>
+                    )}
+                  </div>
+
+                  {/* Checklist Evaluation */}
+                  {aiPreScreen.checklistEvaluation.length > 0 && (
+                    <ul className="divide-y divide-[#DDE2EA] rounded-md border border-[#DDE2EA]">
+                      {aiPreScreen.checklistEvaluation.map((row, idx) => (
+                        <li key={idx} className="flex items-start justify-between gap-4 px-3.5 py-2.5">
+                          <div>
+                            <p className="font-medium text-[#18212F]">{row.requirement}</p>
+                            <p className="text-xs text-[#5B6678]">{row.evidence}</p>
+                          </div>
+                          <span
+                            className={`shrink-0 text-xs font-semibold ${
+                              row.met ? "text-[#1F7A4D]" : "text-[#8A5A00]"
+                            }`}
+                          >
+                            {row.met ? "Met" : "Gap"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* Flagged Inconsistencies */}
+                  {aiPreScreen.inconsistencies.length > 0 && (
+                    <div className="rounded-md bg-[#FFF4DC] border border-[#E5C98B] p-3 text-xs text-[#8A5A00]">
+                      <p className="font-semibold flex items-center gap-1.5 mb-1">
+                        <AlertTriangle className="size-3.5" aria-hidden="true" />
+                        Form vs. document inconsistencies
+                      </p>
+                      <ul className="list-disc pl-4 space-y-0.5">
+                        {aiPreScreen.inconsistencies.map((inc, i) => (
+                          <li key={i}>{inc}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Reviewer Summary */}
+                  <div className="rounded-md bg-[#EAEFFA]/60 p-3">
+                    <p className="text-xs font-semibold text-[#24408E] mb-1">Reviewer summary</p>
+                    <p className="text-sm leading-relaxed text-[#18212F]">
+                      {aiPreScreen.reviewerSummary}
+                    </p>
+                  </div>
+                </div>
+              ) : pc ? (
                 <>
                   <ul className="divide-y divide-[#DDE2EA] rounded-md border border-[#DDE2EA] bg-white text-sm">
                     {[
@@ -1018,14 +1792,18 @@ function ProposalApprovalsView({
                   {pc.notes && <p className="mt-2 text-sm text-[#5B6678]">{pc.notes}</p>}
                 </>
               ) : (
-                <p className="text-sm text-[#5B6678]">No pre-check result is recorded for this proposal.</p>
+                <p className="text-sm text-[#5B6678]">
+                  {selectedCarriedFiles.length > 0
+                    ? "Click \"Run AI Check on Attached PDF\" above to inspect the Facilitator's submitted document."
+                    : "No AI pre-screening result recorded yet. Use Attach & Inspect PDF / Image above to verify signatures and compliance."}
+                </p>
               )}
             </section>
 
             <section>
               <h3 className="mb-2 text-sm font-semibold">Description</h3>
               <p className="max-w-prose text-sm leading-relaxed">
-                {selected.description || "No description provided."}
+                {decodedSelected.cleanDescription || "No description provided."}
               </p>
             </section>
 
@@ -1117,6 +1895,99 @@ function ProposalApprovalsView({
 }
 
 // ============================================================================
+// SHARED AI FEEDBACK DIAGNOSTICS PANEL (Post-Event Sentiment & Executive Summary)
+// ============================================================================
+
+function defaultResponsesForEvent(eventTitle: string): SurveyResponseEntry[] {
+  return [
+    {
+      rating: 5,
+      comment: `The ${eventTitle} program was insightful and directly relevant to our computing curriculum.`,
+    },
+    {
+      rating: 4,
+      comment:
+        "Strong lab demonstrations and approachable speakers, though registration took longer than expected.",
+    },
+    {
+      rating: 5,
+      comment:
+        "Great peer mentoring and practical takeaways. Please schedule more hands-on Q&A time next term.",
+    },
+    {
+      rating: 3,
+      comment:
+        "Informative content, but seating near the back had limited visibility and audio clarity dipped briefly.",
+    },
+  ];
+}
+
+function FeedbackDiagnosticsCard({ diagnostics }: { diagnostics: SurveyDiagnosticsResult }) {
+  const sentimentCls =
+    diagnostics.overallSentiment === "Positive"
+      ? "bg-[#E6F3EC] text-[#1F7A4D]"
+      : diagnostics.overallSentiment === "Mixed"
+      ? "bg-[#FFF4DC] text-[#8A5A00]"
+      : "bg-[#FBEDEC] text-[#B3261E]";
+
+  return (
+    <div className="rounded-md border border-[#DDE2EA] bg-white p-5 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
+        <h3 className="text-sm font-semibold text-[#18212F] flex items-center gap-1.5">
+          <Sparkles className="size-4 text-[#24408E]" aria-hidden="true" />
+          AI Sentiment & Executive Diagnostics
+        </h3>
+        <span className={`rounded px-2.5 py-0.5 text-xs font-semibold ${sentimentCls}`}>
+          {diagnostics.overallSentiment} · Score {diagnostics.sentimentScore} / 100
+        </span>
+      </div>
+
+      <div className="rounded-md bg-[#EAEFFA]/60 p-3.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#24408E] mb-1">
+          Executive summary
+        </p>
+        <p className="text-sm leading-relaxed text-[#18212F]">{diagnostics.executiveSummary}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 text-sm">
+        <div className="rounded-md border border-[#DDE2EA] bg-[#F7F8FA] p-3.5 space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#1F7A4D]">
+            Key strengths
+          </p>
+          <ul className="list-disc pl-4 space-y-1 text-xs text-[#18212F]">
+            {diagnostics.keyStrengths.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="rounded-md border border-[#DDE2EA] bg-[#F7F8FA] p-3.5 space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#8A5A00]">
+            Areas for improvement
+          </p>
+          <ul className="list-disc pl-4 space-y-1 text-xs text-[#18212F]">
+            {diagnostics.areasForImprovement.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="rounded-md border border-[#DDE2EA] bg-[#F7F8FA] p-3.5 space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#24408E]">
+            Actionable recommendations
+          </p>
+          <ul className="list-disc pl-4 space-y-1 text-xs text-[#18212F]">
+            {diagnostics.actionableRecommendations.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // VIEW 2: EVENT SURVEYS
 // ============================================================================
 
@@ -1141,8 +2012,16 @@ function EventSurveysView({
   const [qText, setQText] = useState("");
   const [qType, setQType] = useState<QuestionType>("rating");
   const [draft, setDraft] = useState<SurveyQuestion[]>([DEFAULT_QUESTION]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [cachedAnalyses, setCachedAnalyses] = useState<Record<string, SurveyDiagnosticsResult>>(
+    () => aiLocalCache.getFeedbackAnalyses()
+  );
 
   const active = surveys.find((s) => s.id === selectedId) ?? surveys[0];
+  const activeDiagnostics = active
+    ? active.aiDiagnostics || cachedAnalyses[String(active.eventId)]
+    : undefined;
   const chosenEvent = events.find((e) => e.event_id === eventId) ?? events[0];
   const rate = (s: EventSurvey) =>
     s.targetAudience > 0 ? `${Math.round((s.responsesCount / s.targetAudience) * 100)}%` : "–";
@@ -1178,6 +2057,42 @@ function EventSurveysView({
       prev.map((s) => (s.id === id ? { ...s, status: s.status === "active" ? "closed" : "active" } : s))
     );
 
+  const handleAnalyzeActiveSurvey = async () => {
+    if (!active) return;
+    setAnalyzing(true);
+    setAnalysisError("");
+    try {
+      const responses =
+        active.sampleResponses && active.sampleResponses.length > 0
+          ? active.sampleResponses
+          : [
+              ...(active.summary
+                ? [{ rating: Math.round(active.avgSatisfaction || 4), comment: active.summary }]
+                : []),
+              ...defaultResponsesForEvent(active.eventTitle),
+            ];
+
+      const result = await analyzeAiSurveyFeedback({
+        eventId: active.eventId,
+        eventTitle: active.eventTitle,
+        organization: active.organization,
+        averageRating: active.avgSatisfaction || undefined,
+        totalResponses: active.responsesCount || responses.length,
+        responses,
+      });
+
+      aiLocalCache.saveFeedbackAnalysis(active.eventId, result);
+      setCachedAnalyses((prev) => ({ ...prev, [String(active.eventId)]: result }));
+      setSurveys((prev) =>
+        prev.map((s) => (s.id === active.id ? { ...s, aiDiagnostics: result } : s))
+      );
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "AI feedback analysis failed.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <section
@@ -1206,7 +2121,10 @@ function EventSurveysView({
                 <button
                   type="button"
                   aria-current={isSel}
-                  onClick={() => setSelectedId(s.id)}
+                  onClick={() => {
+                    setSelectedId(s.id);
+                    setAnalysisError("");
+                  }}
                   className={`w-full border-b border-[#DDE2EA] px-4 py-3 text-left cursor-pointer ${focusRing} ${
                     isSel ? "bg-[#EAEFFA] shadow-[inset_3px_0_0_#24408E]" : "hover:bg-[#F7F8FA]"
                   }`}
@@ -1227,15 +2145,41 @@ function EventSurveysView({
 
       {active ? (
         <article className="min-w-0 flex-1 space-y-8 overflow-y-auto p-6 md:p-8">
-          <header className="flex items-start justify-between gap-4">
+          <header className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="font-serif text-2xl font-semibold">{active.eventTitle}</h2>
               <p className="mt-1 text-sm text-[#5B6678]">{active.organization}</p>
             </div>
-            <button type="button" onClick={() => toggleStatus(active.id)} className={btnOutline}>
-              {active.status === "active" ? "Close survey" : "Activate survey"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={analyzing}
+                onClick={handleAnalyzeActiveSurvey}
+                className={btnPrimary}
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Analyzing feedback…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-4" aria-hidden="true" />
+                    Analyze Feedback with AI
+                  </>
+                )}
+              </button>
+              <button type="button" onClick={() => toggleStatus(active.id)} className={btnOutline}>
+                {active.status === "active" ? "Close survey" : "Activate survey"}
+              </button>
+            </div>
           </header>
+
+          {analysisError && (
+            <p role="alert" className="rounded-md bg-[#FBEDEC] px-3 py-2 text-sm text-[#B3261E]">
+              {analysisError}
+            </p>
+          )}
 
           <dl className="grid grid-cols-3 gap-4 border-y border-[#DDE2EA] py-4">
             {[
@@ -1249,6 +2193,8 @@ function EventSurveysView({
               </div>
             ))}
           </dl>
+
+          {activeDiagnostics && <FeedbackDiagnosticsCard diagnostics={activeDiagnostics} />}
 
           {active.responsesCount > 0 && active.summary && (
             <section>
@@ -1377,6 +2323,13 @@ function EventReportsView({
   surveys: EventSurvey[];
   loading: boolean;
 }) {
+  const [selectedReportEventId, setSelectedReportEventId] = useState<number | null>(null);
+  const [analyzingFeedback, setAnalyzingFeedback] = useState(false);
+  const [reportAiError, setReportAiError] = useState("");
+  const [analysisMap, setAnalysisMap] = useState<Record<string, SurveyDiagnosticsResult>>(() =>
+    aiLocalCache.getFeedbackAnalyses()
+  );
+
   if (loading && events.length === 0) return <ReportsSkeleton />;
 
   const rows = events.map((ev) => {
@@ -1389,6 +2342,55 @@ function EventReportsView({
       rate: target && accepted !== null ? Math.round((accepted / target) * 100) : null,
     };
   });
+
+  const targetReportEvent =
+    events.find((e) => e.event_id === selectedReportEventId) ??
+    events.find((e) => e.status === "completed" || e.status === "approved") ??
+    events[0] ??
+    null;
+
+  const targetReportDiagnostics = targetReportEvent
+    ? targetReportEvent.ai_feedback_analysis ||
+      surveys.find((s) => s.eventId === targetReportEvent.event_id)?.aiDiagnostics ||
+      analysisMap[String(targetReportEvent.event_id)]
+    : undefined;
+
+  const handleRunReportAiAnalysis = async () => {
+    if (!targetReportEvent) return;
+    setAnalyzingFeedback(true);
+    setReportAiError("");
+    try {
+      const linkedSurvey = surveys.find((s) => s.eventId === targetReportEvent.event_id);
+      const responses: SurveyResponseEntry[] = [
+        ...(linkedSurvey?.summary
+          ? [
+              {
+                rating: Math.round(linkedSurvey.avgSatisfaction || 4),
+                comment: linkedSurvey.summary,
+              },
+            ]
+          : []),
+        ...defaultResponsesForEvent(targetReportEvent.title),
+      ];
+
+      const result = await analyzeAiSurveyFeedback({
+        eventId: targetReportEvent.event_id,
+        eventTitle: targetReportEvent.title,
+        organization: targetReportEvent.organization,
+        eventDate: targetReportEvent.event_date,
+        averageRating: linkedSurvey?.avgSatisfaction || undefined,
+        totalResponses: linkedSurvey?.responsesCount || responses.length,
+        responses,
+      });
+
+      aiLocalCache.saveFeedbackAnalysis(targetReportEvent.event_id, result);
+      setAnalysisMap((prev) => ({ ...prev, [String(targetReportEvent.event_id)]: result }));
+    } catch (err) {
+      setReportAiError(err instanceof Error ? err.message : "AI feedback analysis failed.");
+    } finally {
+      setAnalyzingFeedback(false);
+    }
+  };
 
   const complete = rows.filter((r) => r.target && r.accepted !== null);
   const totalTarget = complete.reduce((s, r) => s + (r.target ?? 0), 0);
@@ -1450,6 +2452,69 @@ function EventReportsView({
           </div>
         ))}
       </dl>
+
+      {/* AI Executive Feedback Sentiment & Diagnostics Section */}
+      {targetReportEvent && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">AI post-event feedback diagnostics</h2>
+              <p className="text-xs text-[#5B6678]">
+                Synthesize student sentiment scores, key strengths, and actionable recommendations.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Select event for AI feedback diagnostics"
+                value={targetReportEvent.event_id}
+                onChange={(e) => {
+                  setSelectedReportEventId(Number(e.target.value));
+                  setReportAiError("");
+                }}
+                className={`${input} w-auto max-w-xs`}
+              >
+                {events.map((ev) => (
+                  <option key={ev.event_id} value={ev.event_id}>
+                    {ev.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={analyzingFeedback}
+                onClick={handleRunReportAiAnalysis}
+                className={btnPrimary}
+              >
+                {analyzingFeedback ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Analyzing…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-4" aria-hidden="true" />
+                    Analyze Feedback with AI
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {reportAiError && (
+            <p role="alert" className="rounded-md bg-[#FBEDEC] px-3 py-2 text-sm text-[#B3261E]">
+              {reportAiError}
+            </p>
+          )}
+
+          {targetReportDiagnostics ? (
+            <FeedbackDiagnosticsCard diagnostics={targetReportDiagnostics} />
+          ) : (
+            <div className="rounded-md border border-[#DDE2EA] bg-white p-4 text-sm text-[#5B6678]">
+              Select an event and click <b>Analyze Feedback with AI</b> to generate an executive sentiment report.
+            </div>
+          )}
+        </section>
+      )}
 
       {chartData.length > 0 && (
         <section aria-label="Accepted attendees compared with target capacity">
