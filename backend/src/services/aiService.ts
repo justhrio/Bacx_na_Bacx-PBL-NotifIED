@@ -712,6 +712,138 @@ function ensureRequiredEmailElements(
   };
 }
 
+function buildFallbackInstitutionalEmailDigest(
+  eventData: ApprovedEventEmailData,
+  surveyUrl: string
+): FormattedEventEmailDigest {
+  const title = (eventData.title || "Approved Campus Event").trim();
+  const org = (eventData.organization || "Student Organization").trim();
+  const eventDate = (eventData.eventDate || "TBA").trim();
+  const schedule =
+    [eventData.startTime, eventData.endTime].filter(Boolean).join(" – ") || "TBA";
+  const venue = (eventData.venue || "Campus Venue").trim();
+  const cleanDescription =
+    stripAttachmentMarker(eventData.description) ||
+    "You are officially invited to participate in this institutionally approved campus activity.";
+  const regLink = (eventData.registrationLink || "").trim();
+  const clearanceHash =
+    (eventData.clearanceHash || "").trim() || "PENDING-VERIFICATION-HASH";
+  const highlights = (eventData.highlights || []).filter((h) => Boolean(h && h.trim()));
+
+  const emailSubject = `[Official Event Announcement] ${title}${
+    eventDate && eventDate !== "TBA" ? ` — ${eventDate}` : ""
+  }`;
+
+  const highlightsHtml =
+    highlights.length > 0
+      ? `<div style="margin:20px 0;padding:16px 18px;background-color:#F7F9FF;border:1px solid #C5D3F3;border-radius:6px;">
+          <p style="margin:0 0 10px 0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#24408E;">Event Highlights</p>
+          <ul style="margin:0;padding-left:18px;color:#18212F;font-size:13px;line-height:1.6;">
+            ${highlights.map((item) => `<li style="margin-bottom:4px;">${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </div>`
+      : "";
+
+  const registrationHtml = regLink
+    ? `<div style="margin:20px 0;padding:18px;background-color:#EAEFFA;border:1px solid #C5D3F3;border-radius:6px;">
+        <p style="margin:0 0 8px 0;font-size:13px;font-weight:700;color:#1C2D63;">Event Registration</p>
+        <p style="margin:0 0 12px 0;font-size:13px;color:#374151;line-height:1.5;">Confirm your attendance using the official registration link below:</p>
+        <a href="${escapeHtml(regLink)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 22px;background-color:#24408E;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:13px;border-radius:5px;">Register for This Event</a>
+        <p style="margin:10px 0 0 0;font-size:11px;color:#5B6678;word-break:break-all;">Direct registration link: <a href="${escapeHtml(regLink)}" style="color:#24408E;">${escapeHtml(regLink)}</a></p>
+      </div>`
+    : "";
+
+  const surveyHtml = `<div style="margin:20px 0;padding:18px;background-color:#F7F8FA;border:1px solid #DDE2EA;border-radius:6px;">
+      <p style="margin:0 0 8px 0;font-size:13px;font-weight:700;color:#1C2D63;">Post-Event Evaluation Survey (No System Login Required)</p>
+      <p style="margin:0 0 12px 0;font-size:13px;color:#374151;line-height:1.5;">After attending, please share your feedback directly using the official evaluation form below — no CampusSync login is required:</p>
+      <a href="${escapeHtml(surveyUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 22px;background-color:#1F7A4D;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:13px;border-radius:5px;">Complete Post-Event Survey</a>
+      <p style="margin:10px 0 0 0;font-size:11px;color:#5B6678;word-break:break-all;">Direct survey link: <a href="${escapeHtml(surveyUrl)}" style="color:#24408E;">${escapeHtml(surveyUrl)}</a></p>
+    </div>`;
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:24px 12px;background-color:#F2F4F7;font-family:Arial,Helvetica,sans-serif;color:#18212F;">
+  <div style="max-width:640px;margin:0 auto;background-color:#FFFFFF;border:1px solid #DDE2EA;border-radius:8px;overflow:hidden;">
+    <div style="background-color:#1C2D63;padding:24px 28px;border-bottom:4px solid #F2B84B;">
+      <div style="display:inline-block;background-color:#F2B84B;color:#1C2D63;padding:4px 10px;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;border-radius:3px;margin-bottom:10px;">
+        Official Approved Event Announcement
+      </div>
+      <h1 style="margin:0;color:#FFFFFF;font-size:22px;line-height:1.3;">${escapeHtml(title)}</h1>
+      <p style="margin:6px 0 0 0;color:#D5DCF0;font-size:13px;">Organized by ${escapeHtml(org)} · Asia Pacific College</p>
+    </div>
+
+    <div style="padding:26px 28px;">
+      <p style="margin:0 0 18px 0;font-size:14px;line-height:1.65;color:#18212F;">${escapeHtml(cleanDescription)}</p>
+
+      <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:13px;border:1px solid #DDE2EA;">
+        <tr style="background-color:#F7F8FA;border-bottom:1px solid #DDE2EA;">
+          <td style="padding:10px 14px;font-weight:700;color:#24408E;width:34%;">Organizing Body</td>
+          <td style="padding:10px 14px;color:#18212F;">${escapeHtml(org)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #DDE2EA;">
+          <td style="padding:10px 14px;font-weight:700;color:#24408E;">Event Date</td>
+          <td style="padding:10px 14px;color:#18212F;">${escapeHtml(eventDate)}</td>
+        </tr>
+        <tr style="background-color:#F7F8FA;border-bottom:1px solid #DDE2EA;">
+          <td style="padding:10px 14px;font-weight:700;color:#24408E;">Schedule / Time</td>
+          <td style="padding:10px 14px;color:#18212F;">${escapeHtml(schedule)}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;font-weight:700;color:#24408E;">Venue</td>
+          <td style="padding:10px 14px;color:#18212F;">${escapeHtml(venue)}</td>
+        </tr>
+      </table>
+
+      ${highlightsHtml}
+      ${registrationHtml}
+      ${surveyHtml}
+
+      <div style="margin-top:24px;padding:14px 16px;background-color:#E6F3EC;border:1px solid #B6DFC8;border-radius:6px;">
+        <p style="margin:0 0 6px 0;font-size:12px;font-weight:700;color:#1F7A4D;">
+          ✓ Officially Approved &amp; Cleared by Institutional Coordinator Authority (RA 8792 Compliant)
+        </p>
+        <p style="margin:0;font-size:11px;color:#18212F;font-family:Consolas,Monaco,monospace;word-break:break-all;">
+          SHA-256 Verification Hash: ${escapeHtml(clearanceHash)}
+        </p>
+      </div>
+    </div>
+
+    <div style="background-color:#F7F8FA;padding:14px 28px;border-top:1px solid #DDE2EA;text-align:center;font-size:11px;color:#5B6678;">
+      CampusSync Institutional Event Governance · Asia Pacific College
+    </div>
+  </div>
+</body>
+</html>`;
+
+  const plainTextLines = [
+    `OFFICIAL APPROVED EVENT ANNOUNCEMENT`,
+    `${title}`,
+    `Organized by: ${org}`,
+    ``,
+    `Date: ${eventDate}`,
+    `Schedule: ${schedule}`,
+    `Venue: ${venue}`,
+    ``,
+    cleanDescription,
+    ...(highlights.length > 0
+      ? ["", "Key Highlights:", ...highlights.map((h) => `- ${h}`)]
+      : []),
+    ...(regLink ? ["", `Event Registration Link: ${regLink}`] : []),
+    ``,
+    `Post-Event Evaluation Survey (No System Login Required): ${surveyUrl}`,
+    ``,
+    `---`,
+    `Official Institutional Status: Approved & Cleared by Institutional Coordinator Authority (RA 8792 Compliant)`,
+    `SHA-256 Verification Hash: ${clearanceHash}`,
+  ];
+
+  return {
+    emailSubject,
+    htmlBody,
+    plainTextFallback: plainTextLines.join("\n"),
+  };
+}
+
 export async function formatApprovedEventEmailDigest(
   eventData: ApprovedEventEmailData,
   surveyUrl: string,
@@ -800,28 +932,47 @@ Strict Requirements:
    - Provide a clean, well-formatted plain-text equivalent containing every detail above, the exact Registration URL (if provided), the exact Post-Event Survey URL, and the exact SHA-256 Verification Hash.
 7. Never alter, shorten, or replace any URL or the SHA-256 hash.`;
 
-  const { response, modelUsed } = await generateContentWithModelFallback({
-    contents: [
+  try {
+    const { response, modelUsed } = await generateContentWithModelFallback(
       {
-        role: "user",
-        parts: [{ text: promptText }, ...fileParts],
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: promptText }, ...fileParts],
+          },
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: emailDigestResponseSchema,
+        },
       },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: emailDigestResponseSchema,
-    },
-  });
+      {
+        hedgeDelayMs: 3_000,
+        maxTotalTimeoutMs: 22_000,
+      }
+    );
 
-  const parsed = parseJsonResponse<FormattedEventEmailDigest>(
-    response.text,
-    "institutional event email synthesis"
-  );
+    const parsed = parseJsonResponse<FormattedEventEmailDigest>(
+      response.text,
+      "institutional event email synthesis"
+    );
 
-  const verified = ensureRequiredEmailElements(parsed, eventData, surveyUrl, clearanceHash);
-  return {
-    ...verified,
-    modelUsed,
-  };
+    const verified = ensureRequiredEmailElements(parsed, eventData, surveyUrl, clearanceHash);
+    return {
+      ...verified,
+      modelUsed,
+    };
+  } catch (aiErr) {
+    // Graceful high-availability fallback: never block approved institutional email delivery during upstream Gemini outages
+    console.warn(
+      "[EmailSynthesizer] Gemini temporarily unavailable; falling back to institutional HTML template:",
+      aiErr instanceof Error ? aiErr.message : aiErr
+    );
+    const fallbackDigest = buildFallbackInstitutionalEmailDigest(eventData, surveyUrl);
+    return {
+      ...ensureRequiredEmailElements(fallbackDigest, eventData, surveyUrl, clearanceHash),
+      modelUsed: "institutional-template-fallback",
+    };
+  }
 }
 

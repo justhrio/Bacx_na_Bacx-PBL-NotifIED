@@ -3,9 +3,17 @@ import { env } from "./env.js";
 
 let client: GoogleGenAI | null = null;
 
-// Remember models that recently timed out or returned 503/429/404 so subsequent calls skip straight to a healthy model
+// Remember models that recently timed out or returned 503/429/404 so subsequent calls skip straight to a healthy fast model
 const degradedModelUntil = new Map<string, number>();
-const MODEL_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
+const MODEL_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+const SLOW_PRIMARY_COOLDOWN_MS = 90 * 1000; // 90 seconds if a hedged backup beat the primary
+
+export interface FallbackGenerationOptions {
+  /** Wait before launching backup Flash models in parallel if primary hasn't responded yet (ms) */
+  hedgeDelayMs?: number;
+  /** Overall hard deadline across all raced models so Express always responds well before Vercel's 60s cutoff (ms) */
+  maxTotalTimeoutMs?: number;
+}
 
 export function getGeminiClient(): GoogleGenAI {
   if (!env.geminiApiKey) {
@@ -64,72 +72,189 @@ function getOrderedModelsForRequest(): string[] {
     }
   }
 
-  // Try healthy models first; keep cooling-down models at the end as last resort
+  // Try proven healthy models first; keep cooling-down models at the end
   return [...healthy, ...coolingDown];
 }
 
-async function generateWithTimeout(
-  ai: GoogleGenAI,
-  params: Omit<GenerateContentParameters, "model">,
-  model: string,
-  timeoutMs: number
-): Promise<GenerateContentResponse> {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`MODEL_TIMEOUT: "${model}" did not respond within ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  try {
-    const requestPromise = ai.models.generateContent({
-      ...params,
-      model,
-      config: {
-        ...(params.config || {}),
-        abortSignal: controller.signal,
-      },
-    });
-    return await Promise.race([requestPromise, timeoutPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
+/**
+ * Hedged Request Racing across Gemini Flash fallback models:
+ * - Launches the top healthy model immediately (zero extra calls when fast).
+ * - If it returns 503/429/404 OR hasn't responded within `hedgeDelayMs` (default 3.5s),
+ *   races the remaining fallback Flash models in parallel — first valid response wins immediately
+ *   and cleanly aborts slower in-flight requests.
+ */
 export async function generateContentWithModelFallback(
-  params: Omit<GenerateContentParameters, "model">
+  params: Omit<GenerateContentParameters, "model">,
+  options?: FallbackGenerationOptions
 ): Promise<{ response: GenerateContentResponse; modelUsed: string }> {
   const ai = getGeminiClient();
   const orderedModels = getOrderedModelsForRequest();
-  let lastError: unknown;
+  const hedgeDelayMs = options?.hedgeDelayMs ?? 3_500;
+  const maxTotalTimeoutMs = options?.maxTotalTimeoutMs ?? 24_000;
 
-  // Keep worst-case cumulative latency well inside Vercel's 60s serverless timeout
-  for (let i = 0; i < orderedModels.length; i++) {
-    const model = orderedModels[i];
-    const timeoutMs = i < 2 ? 10_000 : 12_000;
-    try {
-      const response = await generateWithTimeout(ai, params, model, timeoutMs);
-      degradedModelUntil.delete(model);
-      return { response, modelUsed: model };
-    } catch (err) {
-      lastError = err;
-      if (isFallbackableModelError(err)) {
-        degradedModelUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
-        console.warn(
-          `[Gemini] Model "${model}" unavailable/slow (${
-            err instanceof Error ? err.message : String(err)
-          }), trying next fallback model...`
-        );
-        continue;
-      }
-      throw err;
-    }
+  if (orderedModels.length === 0) {
+    throw new Error("No Gemini models configured.");
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("The AI service is temporarily unavailable. Please retry shortly.");
+  return new Promise<{ response: GenerateContentResponse; modelUsed: string }>((resolve, reject) => {
+    let settled = false;
+    let backupsLaunched = false;
+    let launchedCount = 0;
+    let completedFailures = 0;
+    let lastError: unknown = null;
+
+    const controllers = new Map<string, AbortController>();
+    const pendingModels = new Set<string>();
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+    let totalTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = (winnerModel?: string) => {
+      if (hedgeTimer) {
+        clearTimeout(hedgeTimer);
+        hedgeTimer = undefined;
+      }
+      if (totalTimer) {
+        clearTimeout(totalTimer);
+        totalTimer = undefined;
+      }
+      for (const [m, ctrl] of controllers.entries()) {
+        if (m !== winnerModel) {
+          try {
+            ctrl.abort();
+          } catch {
+            // Ignore abort errors on already-closed streams
+          }
+        }
+      }
+      controllers.clear();
+    };
+
+    const finishSuccess = (response: GenerateContentResponse, modelUsed: string) => {
+      if (settled) return;
+      settled = true;
+      degradedModelUntil.delete(modelUsed);
+      // If a backup beat a slow primary that was still hanging, softly cool down the primary for 90s
+      const primary = orderedModels[0];
+      if (modelUsed !== primary && pendingModels.has(primary)) {
+        degradedModelUntil.set(primary, Date.now() + SLOW_PRIMARY_COOLDOWN_MS);
+      }
+      cleanup(modelUsed);
+      resolve({ response, modelUsed });
+    };
+
+    const finishFailure = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(
+        err instanceof Error
+          ? err
+          : new Error("The AI service is temporarily unavailable. Please retry shortly.")
+      );
+    };
+
+    const launchModel = (model: string, isPrimary: boolean) => {
+      if (settled) return;
+      const controller = new AbortController();
+      controllers.set(model, controller);
+      pendingModels.add(model);
+      launchedCount += 1;
+
+      ai.models
+        .generateContent({
+          ...params,
+          model,
+          config: {
+            ...(params.config || {}),
+            abortSignal: controller.signal,
+          },
+        })
+        .then((response) => {
+          pendingModels.delete(model);
+          if (settled) return;
+          if (!response.text) {
+            throw new Error(`MODEL_TIMEOUT: "${model}" returned an empty response.`);
+          }
+          finishSuccess(response, model);
+        })
+        .catch((err) => {
+          pendingModels.delete(model);
+          if (settled) return;
+
+          lastError = err;
+          completedFailures += 1;
+
+          if (!isFallbackableModelError(err)) {
+            finishFailure(err);
+            return;
+          }
+
+          degradedModelUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
+          console.warn(
+            `[Gemini] Model "${model}" unavailable/slow (${
+              err instanceof Error ? err.message : String(err)
+            })`
+          );
+
+          // If primary failed early, fire backups immediately without waiting for hedgeDelayMs
+          if (isPrimary && !backupsLaunched) {
+            launchBackups();
+            return;
+          }
+
+          if (backupsLaunched && completedFailures >= launchedCount) {
+            finishFailure(lastError);
+          }
+        });
+    };
+
+    const launchBackups = () => {
+      if (settled || backupsLaunched) return;
+      backupsLaunched = true;
+      if (hedgeTimer) {
+        clearTimeout(hedgeTimer);
+        hedgeTimer = undefined;
+      }
+
+      const backups = orderedModels.slice(1);
+      if (backups.length === 0) {
+        if (completedFailures >= launchedCount) {
+          finishFailure(lastError);
+        }
+        return;
+      }
+
+      console.warn(
+        `[Gemini] Hedging request across fallback models in parallel: ${backups.join(", ")}`
+      );
+      for (const backup of backups) {
+        launchModel(backup, false);
+      }
+    };
+
+    // Start primary model immediately
+    launchModel(orderedModels[0], true);
+
+    // If primary hasn't responded quickly, race backups in parallel
+    if (orderedModels.length > 1) {
+      hedgeTimer = setTimeout(() => {
+        launchBackups();
+      }, hedgeDelayMs);
+    } else {
+      backupsLaunched = true;
+    }
+
+    // Hard deadline across the entire race so Vercel never hits 504 timeout
+    totalTimer = setTimeout(() => {
+      if (settled) return;
+      for (const stalledModel of pendingModels) {
+        degradedModelUntil.set(stalledModel, Date.now() + MODEL_COOLDOWN_MS);
+      }
+      finishFailure(
+        new Error(
+          `MODEL_TIMEOUT: Gemini models did not respond within ${maxTotalTimeoutMs}ms.`
+        )
+      );
+    }, maxTotalTimeoutMs);
+  });
 }
