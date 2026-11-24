@@ -85,6 +85,9 @@ function getSmtpTransporter(): Transporter {
       port: env.smtp.port,
       secure: env.smtp.secure,
       ...(isOffice365 && !env.smtp.secure ? { requireTLS: true } : {}),
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
       auth: {
         user: env.smtp.user,
         pass: env.smtp.pass,
@@ -104,6 +107,9 @@ async function getEtherealTransporter(): Promise<{
       host: cachedEtherealAccount.smtp.host,
       port: cachedEtherealAccount.smtp.port,
       secure: cachedEtherealAccount.smtp.secure,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
       auth: {
         user: cachedEtherealAccount.user,
         pass: cachedEtherealAccount.pass,

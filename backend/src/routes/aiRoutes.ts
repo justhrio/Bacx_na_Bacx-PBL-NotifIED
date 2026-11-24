@@ -998,18 +998,30 @@ router.post(
     } catch (err) {
       const rawMessage =
         err instanceof Error ? err.message : "Institutional email syndication failed.";
-      const friendlyMessage = rawMessage.startsWith("{")
+      const isUpstreamBusy =
+        rawMessage.includes("MODEL_TIMEOUT") ||
+        rawMessage.includes("503") ||
+        rawMessage.includes("UNAVAILABLE") ||
+        rawMessage.includes("high demand") ||
+        rawMessage.includes("429");
+      const friendlyMessage = isUpstreamBusy
+        ? "The Gemini AI service is temporarily experiencing high demand. Please click Retry Email Dispatch."
+        : rawMessage.startsWith("{")
         ? "The AI email synthesizer encountered a temporary error. Please retry shortly."
         : rawMessage;
+      let failedDispatch = null;
       if (dispatchId) {
-        await updateEmailDispatchRecord(dispatchId, {
+        failedDispatch = await updateEmailDispatchRecord(dispatchId, {
           status: "FAILED",
           error_message: friendlyMessage,
         });
       }
-      const statusCode = rawMessage.includes("GEMINI_API_KEY") ? 503 : 400;
+      const statusCode = rawMessage.includes("GEMINI_API_KEY") || isUpstreamBusy ? 503 : 400;
       console.error("[/api/ai/syndicate-email]", err);
-      res.status(statusCode).json({ error: friendlyMessage });
+      res.status(statusCode).json({
+        error: friendlyMessage,
+        ...(failedDispatch ? { dispatch: failedDispatch } : {}),
+      });
     }
   }
 );

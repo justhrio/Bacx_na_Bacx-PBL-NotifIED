@@ -281,7 +281,9 @@ async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
     return await fetch(url, init);
   } catch (err) {
     console.error("[CampusSync AI] Network fetch error:", { url, err });
-    throw new Error("Unable to reach the AI backend service. Check network connectivity or backend status.");
+    throw new Error(
+      "The AI backend took too long to respond or could not be reached. Please click Retry in a moment."
+    );
   }
 }
 
@@ -303,6 +305,11 @@ async function handleApiResponse<T>(url: string, res: Response): Promise<T> {
     if (res.status === 413) {
       throw new Error(
         "The uploaded file exceeds the 4.5 MB serverless payload limit. Please upload a smaller PDF or scan."
+      );
+    }
+    if (res.status === 504) {
+      throw new Error(
+        "The AI service timed out while waiting for Gemini. Please click Retry."
       );
     }
     throw new Error(sanitizeErrorMessage(payload?.error || rawText, res.status));
