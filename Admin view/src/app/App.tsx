@@ -298,7 +298,7 @@ export default function CoordinatorView() {
                   ADMIN
                 </span>
               </div>
-              <p className="text-[11px] text-white/80 font-medium">Asia Pacific College Enterprise System</p>
+              <p className="text-[11px] text-white/80 font-medium">Bacx to bacx Enterprise System</p>
             </div>
           </div>
 
