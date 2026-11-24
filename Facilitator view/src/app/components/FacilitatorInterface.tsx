@@ -80,6 +80,20 @@ const DEFAULT_SYSTEM_ANNOUNCEMENTS: AnnouncementItem[] = [
   },
 ];
 
+function formatEventDateDisplay(dateStr?: string | null): string {
+  if (!dateStr) return "No date set";
+  const dateOnlyMatch = String(dateStr).match(/^(\d{4}-\d{2}-\d{2})/);
+  const parsed = new Date(dateOnlyMatch ? `${dateOnlyMatch[1]}T00:00:00` : dateStr);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateOnlyMatch ? dateOnlyMatch[1] : String(dateStr);
+  }
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function normalizeDateInput(val?: string | null): string {
   if (!val) return "";
   const isoMatch = String(val).match(/^(\d{4}-\d{2}-\d{2})/);
@@ -560,14 +574,14 @@ export function FacilitatorInterface({
           {/* Institutional Brand Header + Collapse Toggle */}
           <div className="p-4 border-b border-white/10 bg-[#162452] flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="size-9 rounded-md bg-[#24408E] border border-[#F2B84B]/50 flex items-center justify-center font-black text-[#F2B84B] text-lg shrink-0">
+              <div className="size-9 rounded-none bg-[#24408E] border border-[#F2B84B]/50 flex items-center justify-center font-black text-[#F2B84B] text-lg shrink-0">
                 C
               </div>
               {!isSidebarCollapsed && (
                 <div className="min-w-0 text-left">
                   <div className="font-bold text-sm tracking-tight text-white truncate">CampusSync</div>
                   <div className="text-[10px] font-mono text-[#B8C3E3] tracking-wider uppercase truncate">
-                    ASIA PACIFIC COLLEGE
+                    BACX TO BACX
                   </div>
                 </div>
               )}
@@ -577,7 +591,7 @@ export function FacilitatorInterface({
               type="button"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-              className="p-1.5 rounded text-[#B8C3E3] hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
+              className="p-1.5 rounded-none text-[#B8C3E3] hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
             >
               {isSidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
@@ -595,7 +609,7 @@ export function FacilitatorInterface({
                 type="button"
                 title="Home"
                 onClick={() => setActiveNav("home")}
-                className={`w-full px-3 py-2.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center relative" : "justify-between"
                 } transition-colors cursor-pointer ${
                   activeNav === "home"
@@ -611,7 +625,7 @@ export function FacilitatorInterface({
                   <span
                     className={`${
                       isSidebarCollapsed ? "absolute top-1.5 right-2 px-1 text-[9px]" : "px-1.5 py-0.5 text-[10px]"
-                    } rounded-full font-bold bg-[#F2B84B] text-[#1C2D63]`}
+                    } rounded-none font-bold bg-[#F2B84B] text-[#1C2D63]`}
                   >
                     {revisionEvents.length}
                   </span>
@@ -629,7 +643,7 @@ export function FacilitatorInterface({
                 type="button"
                 title={editingEvent ? "Edit Revision Proposal" : "Submit Proposal"}
                 onClick={() => setActiveNav("submit")}
-                className={`w-full px-3 py-2.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center" : "gap-3"
                 } transition-colors cursor-pointer ${
                   activeNav === "submit"
@@ -647,7 +661,7 @@ export function FacilitatorInterface({
                 type="button"
                 title="Your Submitted Proposals"
                 onClick={() => setActiveNav("submitted")}
-                className={`w-full px-3 py-2.5 mt-0.5 rounded-md text-xs flex items-center ${
+                className={`w-full px-3 py-2.5 mt-0.5 rounded-none text-xs flex items-center ${
                   isSidebarCollapsed ? "justify-center relative" : "justify-between"
                 } transition-colors cursor-pointer ${
                   activeNav === "submitted"
@@ -660,7 +674,7 @@ export function FacilitatorInterface({
                   {!isSidebarCollapsed && <span>Your Submitted Proposals</span>}
                 </span>
                 {events.length > 0 && !isSidebarCollapsed && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-white/15 text-white">
+                  <span className="px-1.5 py-0.5 rounded-none text-[10px] font-semibold bg-white/15 text-white">
                     {events.length}
                   </span>
                 )}
@@ -686,7 +700,7 @@ export function FacilitatorInterface({
             <button
               onClick={onLogout}
               title="Exit to Login"
-              className="w-full py-2 px-3 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center justify-center gap-1.5 text-xs font-medium cursor-pointer border border-white/20"
+              className="w-full py-2 px-3 rounded-none bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center justify-center gap-1.5 text-xs font-medium cursor-pointer border border-white/20"
             >
               <LogOut className="size-3.5 shrink-0" />
               {!isSidebarCollapsed && <span>Exit to Login</span>}
@@ -713,7 +727,7 @@ export function FacilitatorInterface({
                 fetchMyEvents();
                 fetchAnnouncements();
               }}
-              className="px-3 py-1.5 rounded-md border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-[#18212F] transition-colors flex items-center gap-2 text-xs font-medium cursor-pointer"
+              className="px-3 py-1.5 rounded-none border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-[#18212F] transition-colors flex items-center gap-2 text-xs font-medium cursor-pointer"
             >
               <RefreshCw className={`size-3.5 text-[#24408E] ${loading ? "animate-spin" : ""}`} />
               Refresh
@@ -724,7 +738,7 @@ export function FacilitatorInterface({
         {/* ── TAB 1: HOME (ANNOUNCEMENTS, REVISION DEADLINES & SYSTEM NOTICES) ── */}
         {activeNav === "home" && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
-            <div className="rounded-md bg-[#EAEFFA] border border-[#C5D3F3] px-4 py-3 text-xs text-[#24408E] flex items-center justify-between">
+            <div className="rounded-none bg-[#EAEFFA] border border-[#C5D3F3] px-4 py-3 text-xs text-[#24408E] flex items-center justify-between">
               <span>
                 Welcome back, <b>{currentUser?.full_name || "Facilitator"}</b>! Stay updated on SAO clearance deadlines and revision requests below.
               </span>
@@ -733,18 +747,18 @@ export function FacilitatorInterface({
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left 6 Columns: Deadlines for Requested Changes from Admins */}
-              <div className="lg:col-span-6 rounded-lg bg-white border border-[#DDE2EA] p-6 space-y-4 h-fit text-left shadow-xs">
+              <div className="lg:col-span-6 rounded-none bg-white border border-[#DDE2EA] p-6 space-y-4 h-fit text-left shadow-xs">
                 <div className="flex items-center justify-between border-b border-[#DDE2EA] pb-3">
                   <h2 className="text-xs font-bold tracking-wider text-[#8A5A00] uppercase flex items-center gap-2">
                     <BellRing className="size-4" /> Action Required: Revision Deadlines
                   </h2>
-                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B]">
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-none bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B]">
                     {revisionEvents.length} Pending Action
                   </span>
                 </div>
 
                 {revisionEvents.length === 0 ? (
-                  <div className="p-6 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] text-center space-y-1">
+                  <div className="p-6 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] text-center space-y-1">
                     <CheckCircle2 className="size-6 text-[#1F7A4D] mx-auto mb-1" />
                     <p className="text-xs font-semibold text-[#18212F]">No Requested Revisions</p>
                     <p className="text-[11px] text-[#5B6678]">
@@ -756,21 +770,21 @@ export function FacilitatorInterface({
                     {revisionEvents.map((ev) => (
                       <div
                         key={ev.event_id}
-                        className="p-4 rounded-md bg-[#FFFDF7] border border-[#E5C98B] space-y-2.5"
+                        className="p-4 rounded-none bg-[#FFFDF7] border border-[#E5C98B] space-y-2.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <h3 className="text-sm font-bold text-[#18212F]">{ev.title}</h3>
                             <p className="text-[11px] text-[#5B6678]">
-                              Event Date: {ev.event_date || "TBD"} • Venue: {ev.venue}
+                              Event Date: {formatEventDateDisplay(ev.event_date)} • Venue: {ev.venue}
                             </p>
                           </div>
-                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#FBEDEC] text-[#B3261E] border border-[#E2B3AF] shrink-0">
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-none bg-[#FBEDEC] text-[#B3261E] border border-[#E2B3AF] shrink-0">
                             Due: {getRevisionDeadlineLabel(ev.event_date)}
                           </span>
                         </div>
 
-                        <div className="p-2.5 rounded bg-[#FFF4DC] border border-[#E5C98B] text-xs text-[#6B4600] whitespace-pre-line">
+                        <div className="p-2.5 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-xs text-[#6B4600] whitespace-pre-line">
                           <span className="font-bold text-[#8A5A00] block text-[10px] uppercase mb-0.5">
                             Admin Coordinator Remarks:
                           </span>
@@ -781,10 +795,10 @@ export function FacilitatorInterface({
                           <button
                             type="button"
                             onClick={() => handleStartEditProposal(ev)}
-                            className="px-3 py-1.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                            className="px-3 py-1.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                           >
                             <Pencil className="size-3.5" />
-                            Edit &amp; Resubmit Proposal
+                            Edit & Resubmit Proposal
                           </button>
                           <button
                             type="button"
@@ -801,19 +815,19 @@ export function FacilitatorInterface({
               </div>
 
               {/* Right 6 Columns: Admin & System Announcements */}
-              <div className="lg:col-span-6 rounded-lg bg-white border border-[#DDE2EA] p-6 space-y-4 h-fit text-left shadow-xs">
+              <div className="lg:col-span-6 rounded-none bg-white border border-[#DDE2EA] p-6 space-y-4 h-fit text-left shadow-xs">
                 <div className="flex items-center justify-between border-b border-[#DDE2EA] pb-3">
                   <h2 className="text-xs font-bold tracking-wider text-[#24408E] uppercase flex items-center gap-2">
-                    <Megaphone className="size-4" /> Facilitator &amp; System Announcements
+                    <Megaphone className="size-4" /> Facilitator & System Announcements
                   </h2>
-                  <span className="text-[10px] font-mono text-[#5B6678]">SAO &amp; System</span>
+                  <span className="text-[10px] font-mono text-[#5B6678]">SAO & System</span>
                 </div>
 
                 <div className="space-y-3">
                   {announcements.map((ann) => (
                     <div
                       key={ann.id}
-                      className="p-4 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-1.5"
+                      className="p-4 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-sm font-bold text-[#18212F]">{ann.title}</h3>
@@ -833,12 +847,12 @@ export function FacilitatorInterface({
         {/* ── TAB 2: CLEAN PROPOSAL SUBMISSION / EDIT FORM (NO AI UI) ── */}
         {activeNav === "submit" && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8">
-            <div className="max-w-3xl mx-auto rounded-lg bg-white border border-[#DDE2EA] p-6 shadow-xs h-fit space-y-4">
+            <div className="max-w-3xl mx-auto rounded-none bg-white border border-[#DDE2EA] p-6 shadow-xs h-fit space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
                 <h2 className="text-xs font-bold tracking-wider text-[#24408E] uppercase flex items-center gap-2">
                   {editingEvent ? (
                     <>
-                      <Pencil className="size-4" /> Edit &amp; Resubmit Proposal (#{editingEvent.event_id})
+                      <Pencil className="size-4" /> Edit & Resubmit Proposal (#{editingEvent.event_id})
                     </>
                   ) : (
                     <>
@@ -853,7 +867,7 @@ export function FacilitatorInterface({
                       resetForm();
                       setActiveNav("submitted");
                     }}
-                    className="px-2.5 py-1 rounded-md border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-xs font-medium text-[#18212F] flex items-center gap-1.5 cursor-pointer"
+                    className="px-2.5 py-1 rounded-none border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-xs font-medium text-[#18212F] flex items-center gap-1.5 cursor-pointer"
                   >
                     <ArrowLeft className="size-3.5" /> Cancel Edit
                   </button>
@@ -862,7 +876,7 @@ export function FacilitatorInterface({
 
               {/* Admin Coordinator Revision Banner when editing a Needs Revision proposal */}
               {editingEvent && (
-                <div className="p-4 rounded-md bg-[#FFF4DC] border border-[#E5C98B] text-left space-y-1">
+                <div className="p-4 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-left space-y-1">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-[#8A5A00]">
                     <AlertTriangle className="size-4 shrink-0" />
                     Coordinator Revision Request — Update the details/documents below and resubmit
@@ -882,20 +896,20 @@ export function FacilitatorInterface({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g., Annual Tech Hackathon"
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   />
                 </div>
 
                 <div>
                   <label className="text-xs font-semibold text-[#18212F] block mb-1">
-                    Student Organization *
+                    Organization *
                   </label>
                   <input
                     required
                     value={organization}
                     onChange={(e) => setOrganization(e.target.value)}
                     placeholder="e.g., Computer Science Society"
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   />
                 </div>
 
@@ -907,7 +921,7 @@ export function FacilitatorInterface({
                       required
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                   <div>
@@ -917,7 +931,7 @@ export function FacilitatorInterface({
                       required
                       value={startTime}
                       onChange={(e) => setStartTime(e.target.value)}
-                      className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                   <div>
@@ -927,7 +941,7 @@ export function FacilitatorInterface({
                       required
                       value={endTime}
                       onChange={(e) => setEndTime(e.target.value)}
-                      className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                 </div>
@@ -939,7 +953,7 @@ export function FacilitatorInterface({
                     value={venue}
                     onChange={(e) => setVenue(e.target.value)}
                     placeholder="e.g., Multipurpose Hall 1"
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   />
                 </div>
 
@@ -954,7 +968,7 @@ export function FacilitatorInterface({
                       value={expectedAttendees}
                       onChange={(e) => setExpectedAttendees(e.target.value)}
                       placeholder="e.g., 150"
-                      className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                   <div>
@@ -967,16 +981,16 @@ export function FacilitatorInterface({
                       value={estimatedBudget}
                       onChange={(e) => setEstimatedBudget(e.target.value)}
                       placeholder="e.g., 15000"
-                      className="w-full p-2 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                      className="w-full p-2 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                     />
                   </div>
                   <div className="flex items-end">
-                    <label className="w-full p-2 rounded-md bg-[#F7F8FA] border border-[#C9D0DB] text-xs text-[#18212F] flex items-center gap-2 cursor-pointer select-none">
+                    <label className="w-full p-2 rounded-none bg-[#F7F8FA] border border-[#C9D0DB] text-xs text-[#18212F] flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={hasExternalGuests}
                         onChange={(e) => setHasExternalGuests(e.target.checked)}
-                        className="accent-[#24408E] cursor-pointer"
+                        className="accent-[#24408E] cursor-pointer rounded-none"
                       />
                       <span>External Guests / Speakers</span>
                     </label>
@@ -990,7 +1004,7 @@ export function FacilitatorInterface({
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Objectives and program flow..."
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none resize-none"
                   />
                 </div>
 
@@ -1002,21 +1016,21 @@ export function FacilitatorInterface({
                     value={regLink}
                     onChange={(e) => setRegLink(e.target.value)}
                     placeholder="https://forms.gle/..."
-                    className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
+                    className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] focus:ring-2 focus:ring-[#24408E]/20 outline-none"
                   />
                 </div>
 
                 {/* Standard Supporting Document Uploads (No AI Controls on Facilitator Side) */}
-                <div className="p-4 rounded-md bg-[#F7F8FA] border border-[#DDE2EA] space-y-2.5 mt-3">
+                <div className="p-4 rounded-none bg-[#F7F8FA] border border-[#DDE2EA] space-y-2.5 mt-3">
                   <div className="flex items-center justify-between border-b border-[#DDE2EA] pb-2">
                     <span className="text-xs font-bold text-[#18212F] uppercase tracking-wider flex items-center gap-1.5">
-                      <Paperclip className="size-3.5 text-[#24408E]" /> Clearance Documents &amp; Attachments
+                      <Paperclip className="size-3.5 text-[#24408E]" /> Clearance Documents & Attachments
                     </span>
                     <span className="text-[11px] text-[#5B6678]">PDF, PNG, or JPEG</span>
                   </div>
 
                   {/* Signed APF Form */}
-                  <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
+                  <div className="flex items-center justify-between p-2.5 rounded-none bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
                     <label className="flex items-center gap-2 text-xs text-[#18212F] cursor-pointer flex-1 min-w-0">
                       <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
                       <span className="font-medium shrink-0">Signed APF Form *</span>
@@ -1043,7 +1057,7 @@ export function FacilitatorInterface({
                       <button
                         type="button"
                         onClick={() => setApfFile(null)}
-                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded hover:bg-[#FBEDEC] cursor-pointer shrink-0"
+                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded-none hover:bg-[#FBEDEC] cursor-pointer shrink-0"
                         title="Remove attachment"
                       >
                         <X className="size-3.5" />
@@ -1052,7 +1066,7 @@ export function FacilitatorInterface({
                   </div>
 
                   {/* Participant Waivers */}
-                  <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
+                  <div className="flex items-center justify-between p-2.5 rounded-none bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
                     <label className="flex items-center gap-2 text-xs text-[#18212F] cursor-pointer flex-1 min-w-0">
                       <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
                       <span className="font-medium shrink-0">Participant Waivers (If Off-Campus / MPH1)</span>
@@ -1079,7 +1093,7 @@ export function FacilitatorInterface({
                       <button
                         type="button"
                         onClick={() => setWaiverFile(null)}
-                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded hover:bg-[#FBEDEC] cursor-pointer shrink-0"
+                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded-none hover:bg-[#FBEDEC] cursor-pointer shrink-0"
                         title="Remove attachment"
                       >
                         <X className="size-3.5" />
@@ -1088,7 +1102,7 @@ export function FacilitatorInterface({
                   </div>
 
                   {/* Additional Supporting Document */}
-                  <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
+                  <div className="flex items-center justify-between p-2.5 rounded-none bg-white border border-[#DDE2EA] hover:border-[#24408E]/50 transition">
                     <label className="flex items-center gap-2 text-xs text-[#18212F] cursor-pointer flex-1 min-w-0">
                       <Paperclip className="size-3.5 text-[#24408E] shrink-0" />
                       <span className="font-medium shrink-0">Additional Supporting Document (Optional)</span>
@@ -1115,7 +1129,7 @@ export function FacilitatorInterface({
                       <button
                         type="button"
                         onClick={() => setSupportingFile(null)}
-                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded hover:bg-[#FBEDEC] cursor-pointer shrink-0"
+                        className="text-[#5B6678] hover:text-[#B3261E] transition p-1 rounded-none hover:bg-[#FBEDEC] cursor-pointer shrink-0"
                         title="Remove attachment"
                       >
                         <X className="size-3.5" />
@@ -1133,7 +1147,7 @@ export function FacilitatorInterface({
                         resetForm();
                         setActiveNav("submitted");
                       }}
-                      className="px-4 py-2.5 rounded-md border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-[#18212F] font-semibold text-xs cursor-pointer"
+                      className="px-4 py-2.5 rounded-none border border-[#C9D0DB] bg-white hover:bg-[#F2F4F7] text-[#18212F] font-semibold text-xs cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -1141,7 +1155,7 @@ export function FacilitatorInterface({
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 py-2.5 px-4 rounded-md font-bold text-xs flex items-center justify-center gap-2 transition-all bg-[#24408E] hover:bg-[#1B3270] text-white shadow-xs cursor-pointer disabled:opacity-50"
+                    className="flex-1 py-2.5 px-4 rounded-none font-bold text-xs flex items-center justify-center gap-2 transition-all bg-[#24408E] hover:bg-[#1B3270] text-white shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     <Send className="size-3.5" />
                     {submitting
@@ -1171,7 +1185,7 @@ export function FacilitatorInterface({
 
               <div className="space-y-3">
                 {events.length === 0 ? (
-                  <div className="p-8 rounded-lg bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
+                  <div className="p-8 rounded-none bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
                     No proposals submitted yet. Go to <b>Submit Proposal</b> to create one.
                   </div>
                 ) : (
@@ -1181,7 +1195,7 @@ export function FacilitatorInterface({
                     return (
                       <div
                         key={item.event_id}
-                        className={`p-5 rounded-lg bg-white border space-y-2.5 text-left shadow-xs ${
+                        className={`p-5 rounded-none bg-white border space-y-2.5 text-left shadow-xs ${
                           needsRev ? "border-[#E5C98B] ring-1 ring-[#E5C98B]/60" : "border-[#DDE2EA]"
                         }`}
                       >
@@ -1192,13 +1206,13 @@ export function FacilitatorInterface({
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                             {decoded.files.length > 0 && (
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded border bg-[#EAEFFA] text-[#24408E] border-[#C5D3F3] flex items-center gap-1">
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-none border bg-[#EAEFFA] text-[#24408E] border-[#C5D3F3] flex items-center gap-1">
                                 <Paperclip className="size-3" /> {decoded.files.length} Attachment
                                 {decoded.files.length === 1 ? "" : "s"}
                               </span>
                             )}
                             <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded capitalize border ${getStatusBadgeClasses(
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-none capitalize border ${getStatusBadgeClasses(
                                 item.status
                               )}`}
                             >
@@ -1209,7 +1223,8 @@ export function FacilitatorInterface({
 
                         <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#5B6678]">
                           <span className="flex items-center gap-1">
-                            <Calendar className="size-3 text-[#24408E]" /> {item.event_date || "No date set"}
+                            <Calendar className="size-3 text-[#24408E]" />{" "}
+                            {formatEventDateDisplay(item.event_date)}
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock className="size-3 text-[#24408E]" /> {item.start_time || "--"} -{" "}
@@ -1236,7 +1251,7 @@ export function FacilitatorInterface({
                                   const url = carriedAttachmentToBlobUrl(att);
                                   if (url) window.open(url, "_blank", "noopener,noreferrer");
                                 }}
-                                className="px-2.5 py-1 rounded bg-[#F7F8FA] hover:bg-[#EAEFFA] border border-[#DDE2EA] text-[11px] text-[#24408E] font-medium flex items-center gap-1.5 cursor-pointer"
+                                className="px-2.5 py-1 rounded-none bg-[#F7F8FA] hover:bg-[#EAEFFA] border border-[#DDE2EA] text-[11px] text-[#24408E] font-medium flex items-center gap-1.5 cursor-pointer"
                               >
                                 <Paperclip className="size-3" />
                                 <span className="truncate max-w-[200px]">{att.name}</span>
@@ -1247,7 +1262,7 @@ export function FacilitatorInterface({
                         )}
 
                         {needsRev && (
-                          <div className="p-3.5 rounded-md bg-[#FFF4DC] border border-[#E5C98B] text-xs space-y-2.5 mt-2">
+                          <div className="p-3.5 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-xs space-y-2.5 mt-2">
                             <div>
                               <span className="font-bold flex items-center gap-1.5 mb-0.5 text-[#8A5A00]">
                                 <AlertCircle className="size-3.5" /> Coordinator Revision Notes:
@@ -1260,26 +1275,26 @@ export function FacilitatorInterface({
                             <button
                               type="button"
                               onClick={() => handleStartEditProposal(item)}
-                              className="px-3.5 py-2 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                              className="px-3.5 py-2 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <Pencil className="size-3.5" />
-                              Edit &amp; Resubmit to Admin
+                              Edit & Resubmit to Admin
                             </button>
                           </div>
                         )}
 
                         {/* Cryptographic Clearance Seal & Mobile Syndication */}
                         {item.status === "approved" && (
-                          <div className="p-3 rounded-md bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-1.5 mt-2.5">
+                          <div className="p-3 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-xs space-y-1.5 mt-2.5">
                             <div className="flex items-center justify-between">
                               <span className="text-[#1F7A4D] font-bold text-[11px] flex items-center gap-1.5">
                                 <ShieldCheck className="size-3.5" /> Institutional Clearance Endorsement
                               </span>
-                              <span className="text-[9px] px-2 py-0.5 rounded bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
+                              <span className="text-[9px] px-2 py-0.5 rounded-none bg-white text-[#1F7A4D] border border-[#B6DFC8] font-semibold">
                                 RA 8792 Signed
                               </span>
                             </div>
-                            <div className="font-mono text-[9px] text-[#18212F] break-all bg-white/80 p-2 rounded border border-[#B6DFC8]">
+                            <div className="font-mono text-[9px] text-[#18212F] break-all bg-white/80 p-2 rounded-none border border-[#B6DFC8]">
                               SHA-256:{" "}
                               {item.clearance_hash ||
                                 "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"}
