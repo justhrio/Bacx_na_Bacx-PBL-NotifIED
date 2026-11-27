@@ -2510,12 +2510,12 @@ export function CoordinatorInterface({
                   {triageLoading ? (
                     <>
                       <Loader2 className="size-3.5 animate-spin text-[#24408E]" />
-                      Running AI Priority Queue Triage...
+                      Running Priority Queue...
                     </>
                   ) : (
                     <>
                       <Sparkles className="size-3.5 text-[#24408E]" />
-                      Run AI Priority Queue Triage
+                      Run Priority Queueing
                     </>
                   )}
                 </button>
