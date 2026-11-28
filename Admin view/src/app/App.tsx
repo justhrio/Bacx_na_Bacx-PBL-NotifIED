@@ -34,6 +34,12 @@ import {
   Paperclip,
   Mail,
   TrendingUp,
+  Bell,
+  ShieldAlert,
+  Lock,
+  X,
+  Wallet,
+  ArrowRight,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
@@ -75,6 +81,8 @@ import {
   decodeProposalDescription,
   encodeProposalDescriptionWithAttachments,
   isFreshProcessingState,
+  type CarriedDeptHeadClearance,
+  type DeptHeadClearanceStatus,
 } from "../lib/proposalAttachments";
 import { PublicSurveyPage } from "./components/PublicSurveyPage";
 import {
@@ -111,6 +119,10 @@ export interface EventRecord {
   accepted_attendees?: number;
   estimated_budget?: number;
   has_external_guests?: boolean;
+  requires_dept_head_review?: boolean;
+  dept_head_status?: "pending" | "approved" | "revision" | "rejected" | null;
+  dept_head_feedback?: string;
+  dept_head_approved_at?: string;
   document_bucket?: string;
   document_path?: string;
   waiver_path?: string;
@@ -120,6 +132,209 @@ export interface EventRecord {
   ai_survey_draft?: GeneratedSurveyResult;
   ai_feedback_analysis?: SurveyDiagnosticsResult;
   created_at?: string;
+}
+
+export type FinanceClearanceState =
+  | "AWAITING_DEPT_HEAD"
+  | "DEPT_HEAD_APPROVED"
+  | "NOT_REQUIRED";
+
+export interface FinanceClearanceDetails {
+  state: FinanceClearanceState;
+  requiresDeptHeadReview: boolean;
+  deptHeadStatus: DeptHeadClearanceStatus | null;
+  deptHeadFeedback: string | null;
+  deptHeadApprovedAt: string | null;
+  deptHeadReviewedBy: string | null;
+  estimatedBudget: number | null;
+  triggerReasons: string[];
+}
+
+export interface AdminNotificationItem {
+  id: string;
+  eventId: number;
+  eventTitle: string;
+  organization?: string;
+  message: string;
+  type: "DEPT_HEAD_APPROVED" | "DEPT_HEAD_REVISION" | "DEPT_HEAD_REJECTED" | "INFO";
+  createdAt: string;
+  read: boolean;
+}
+
+const ADMIN_NOTIFICATIONS_STORAGE_KEY = "campussync_admin_notifications_v1";
+
+function loadAdminNotifications(): AdminNotificationItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(ADMIN_NOTIFICATIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as AdminNotificationItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAdminNotifications(items: AdminNotificationItem[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ADMIN_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(items.slice(0, 40)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function formatCurrencyPhp(amount?: number | null): string {
+  if (amount == null || Number.isNaN(Number(amount))) return "₱0.00";
+  return `₱${Number(amount).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function normalizeDeptHeadStatus(value?: string | null): DeptHeadClearanceStatus | null {
+  if (!value) return null;
+  const normalized = value.toLowerCase().trim();
+  if (normalized === "approved" || normalized === "endorsed") return "approved";
+  if (normalized === "revision" || normalized === "needs_revision") return "revision";
+  if (normalized === "rejected") return "rejected";
+  if (normalized === "pending") return "pending";
+  return null;
+}
+
+const BUDGET_AUDIT_KEYWORD_RE =
+  /\b(budget|financ(?:e|ial)|expense|disbursement|funding|liquidation|treasurer|audit|cash\s+advance|cost\s+breakdown|department\s+head)\b/i;
+
+const BUDGET_SUMMARY_FLAG_RE =
+  /\b(budget\s+(?:audit|review|approval|clearance|breakdown|proposal|allocation)|financial\s+(?:audit|review|clearance|approval)|requires?\s+department\s+head)\b/i;
+
+function extractBudgetAuditFlags(
+  preScreen?: PreScreenResult | null,
+  triage?: TriageResult | null
+): string[] {
+  const flags: string[] = [];
+  const pushUnique = (label: string) => {
+    const trimmed = label.trim();
+    if (trimmed && !flags.includes(trimmed)) {
+      flags.push(trimmed);
+    }
+  };
+
+  if (preScreen) {
+    for (const file of preScreen.missingFiles || []) {
+      if (BUDGET_AUDIT_KEYWORD_RE.test(file)) {
+        pushUnique(`AI missing file flag: ${file}`);
+      }
+    }
+    for (const field of preScreen.missingFields || []) {
+      if (BUDGET_AUDIT_KEYWORD_RE.test(field)) {
+        pushUnique(`AI missing field flag: ${field}`);
+      }
+    }
+    for (const inc of preScreen.inconsistencies || []) {
+      if (BUDGET_AUDIT_KEYWORD_RE.test(inc)) {
+        pushUnique(`AI financial discrepancy: ${inc}`);
+      }
+    }
+    for (const line of preScreen.signatureCheck?.missingSignatureLines || []) {
+      if (BUDGET_AUDIT_KEYWORD_RE.test(line)) {
+        pushUnique(`AI missing signature line: ${line}`);
+      }
+    }
+    for (const item of preScreen.checklistEvaluation || []) {
+      const combined = `${item.requirement} ${item.evidence}`;
+      if (
+        BUDGET_AUDIT_KEYWORD_RE.test(combined) &&
+        (!item.met || BUDGET_SUMMARY_FLAG_RE.test(combined))
+      ) {
+        pushUnique(`AI checklist audit: ${item.requirement}`);
+      }
+    }
+    const narrative = `${preScreen.verdictMessage || ""} ${preScreen.reviewerSummary || ""}`;
+    if (flags.length === 0 && BUDGET_SUMMARY_FLAG_RE.test(narrative)) {
+      pushUnique("AI Pre-Screen flagged budget/financial review requirement");
+    }
+  }
+
+  if (triage) {
+    for (const risk of triage.riskFlags || []) {
+      if (BUDGET_AUDIT_KEYWORD_RE.test(risk)) {
+        pushUnique(`AI Triage risk flag: ${risk}`);
+      }
+    }
+  }
+
+  return flags;
+}
+
+export function getFinanceClearanceDetails(
+  ev: EventRecord,
+  preScreenOverride?: PreScreenResult | null,
+  triageOverride?: TriageResult | null
+): FinanceClearanceDetails {
+  const decoded = decodeProposalDescription(ev.description);
+  const carried: CarriedDeptHeadClearance | null = decoded.deptHeadClearance;
+
+  const rawBudget =
+    ev.estimated_budget !== undefined && ev.estimated_budget !== null
+      ? Number(ev.estimated_budget)
+      : carried?.estimatedBudget !== undefined && carried?.estimatedBudget !== null
+      ? Number(carried.estimatedBudget)
+      : null;
+  const estimatedBudget =
+    rawBudget !== null && Number.isFinite(rawBudget) ? rawBudget : null;
+
+  const deptHeadStatus = normalizeDeptHeadStatus(ev.dept_head_status ?? carried?.status ?? null);
+  const deptHeadFeedback = (ev.dept_head_feedback ?? carried?.feedback ?? null) || null;
+  const deptHeadApprovedAt = (ev.dept_head_approved_at ?? carried?.approvedAt ?? null) || null;
+  const deptHeadReviewedBy = carried?.reviewedBy ?? null;
+
+  const effectivePreScreen = preScreenOverride ?? ev.ai_prescreen_result ?? decoded.preScreen ?? null;
+  const effectiveTriage = triageOverride ?? ev.ai_triage_result ?? null;
+  const aiBudgetFlags = extractBudgetAuditFlags(effectivePreScreen, effectiveTriage);
+
+  const hasPositiveBudget = (estimatedBudget ?? 0) > 0;
+  const explicitlyRequired =
+    ev.requires_dept_head_review === true || carried?.requiresDeptHeadReview === true;
+
+  const triggerReasons: string[] = [];
+  if (hasPositiveBudget && estimatedBudget !== null) {
+    triggerReasons.push(`Proposed budget of ${formatCurrencyPhp(estimatedBudget)} requires financial audit`);
+  }
+  if (explicitlyRequired) {
+    triggerReasons.push("Flagged for mandatory Department Head budget clearance");
+  }
+  for (const flag of aiBudgetFlags.slice(0, 3)) {
+    triggerReasons.push(flag);
+  }
+
+  const requiresDeptHeadReview =
+    hasPositiveBudget ||
+    explicitlyRequired ||
+    aiBudgetFlags.length > 0 ||
+    deptHeadStatus !== null;
+
+  let state: FinanceClearanceState = "NOT_REQUIRED";
+  if (deptHeadStatus === "approved") {
+    state = "DEPT_HEAD_APPROVED";
+  } else if (requiresDeptHeadReview) {
+    state = "AWAITING_DEPT_HEAD";
+  }
+
+  return {
+    state,
+    requiresDeptHeadReview,
+    deptHeadStatus,
+    deptHeadFeedback,
+    deptHeadApprovedAt,
+    deptHeadReviewedBy,
+    estimatedBudget,
+    triggerReasons,
+  };
+}
+
+export function getFinanceClearanceState(ev: EventRecord): FinanceClearanceState {
+  return getFinanceClearanceDetails(ev).state;
 }
 
 interface AnnouncementItem {
@@ -602,6 +817,128 @@ export function CoordinatorInterface({
   const [syndicatingEventId, setSyndicatingEventId] = useState<number | null>(null);
   const [previewDispatch, setPreviewDispatch] = useState<EmailDispatchRecord | null>(null);
 
+  // ── Two-Stage Finance Clearance & Real-Time Admin Notification Center State ──
+  const [notifications, setNotifications] = useState<AdminNotificationItem[]>(() =>
+    loadAdminNotifications()
+  );
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  const [activeToasts, setActiveToasts] = useState<AdminNotificationItem[]>([]);
+  const [routingDeptHeadId, setRoutingDeptHeadId] = useState<number | null>(null);
+  const notificationDrawerRef = useRef<HTMLDivElement | null>(null);
+  const seenNotificationIdsRef = useRef<Set<string>>(
+    new Set(loadAdminNotifications().map((n) => n.id))
+  );
+  const prevDeptHeadStateRef = useRef<
+    Map<number, { status: DeptHeadClearanceStatus | null; approvedAt: string | null }>
+  >(new Map());
+  const hasHydratedQueueRef = useRef(false);
+
+  useEffect(() => {
+    saveAdminNotifications(notifications);
+  }, [notifications]);
+
+  useEffect(() => {
+    if (!showNotificationDrawer) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        notificationDrawerRef.current &&
+        !notificationDrawerRef.current.contains(event.target as Node)
+      ) {
+        setShowNotificationDrawer(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [showNotificationDrawer]);
+
+  const dismissToast = (id: string) => {
+    setActiveToasts((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const pushAdminNotification = (item: AdminNotificationItem) => {
+    if (seenNotificationIdsRef.current.has(item.id)) {
+      return;
+    }
+    seenNotificationIdsRef.current.add(item.id);
+
+    setNotifications((prev) => {
+      if (prev.some((existing) => existing.id === item.id)) {
+        return prev;
+      }
+      return [item, ...prev].slice(0, 40);
+    });
+
+    setActiveToasts((prev) => {
+      if (prev.some((t) => t.id === item.id)) return prev;
+      return [item, ...prev].slice(0, 3);
+    });
+
+    window.setTimeout(() => {
+      setActiveToasts((prev) => prev.filter((t) => t.id !== item.id));
+    }, 9000);
+  };
+
+  const markNotificationRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, read: true } : item))
+    );
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+  };
+
+  const clearAllNotifications = () => {
+    setNotifications([]);
+    setActiveToasts([]);
+  };
+
+  const detectDeptHeadApprovalTransition = (
+    nextEv: EventRecord,
+    oldEv?: Partial<EventRecord> | null
+  ) => {
+    const nextDetails = getFinanceClearanceDetails(nextEv);
+    const nextStatus = nextDetails.deptHeadStatus;
+    const nextApprovedAt = nextDetails.deptHeadApprovedAt;
+
+    const prevTracked = prevDeptHeadStateRef.current.get(nextEv.event_id);
+    const oldCarried = oldEv?.description
+      ? decodeProposalDescription(oldEv.description).deptHeadClearance
+      : null;
+    const oldStatus =
+      normalizeDeptHeadStatus(oldEv?.dept_head_status ?? oldCarried?.status ?? null) ??
+      prevTracked?.status ??
+      null;
+    const oldApprovedAt =
+      oldEv?.dept_head_approved_at ?? oldCarried?.approvedAt ?? prevTracked?.approvedAt ?? null;
+
+    prevDeptHeadStateRef.current.set(nextEv.event_id, {
+      status: nextStatus,
+      approvedAt: nextApprovedAt,
+    });
+
+    const transitionedToApproved =
+      nextStatus === "approved" &&
+      (oldStatus !== "approved" ||
+        Boolean(nextApprovedAt && oldApprovedAt && nextApprovedAt !== oldApprovedAt));
+
+    if (transitionedToApproved) {
+      const notifId = `dept-head-approved-${nextEv.event_id}-${nextApprovedAt || "approved"}`;
+      pushAdminNotification({
+        id: notifId,
+        eventId: nextEv.event_id,
+        eventTitle: nextEv.title,
+        organization: nextEv.organization,
+        message: `${nextEv.title} budget has been reviewed and approved by the Department Head. Ready for Admin Coordinator final approval.`,
+        type: "DEPT_HEAD_APPROVED",
+        createdAt: nextApprovedAt || new Date().toISOString(),
+        read: false,
+      });
+    }
+  };
+
   const getEventTriage = (ev: EventRecord): TriageResult | undefined =>
     ev.ai_triage_result || triageMap[String(ev.event_id)];
 
@@ -666,15 +1003,40 @@ export function CoordinatorInterface({
     return tier === "P1";
   }).length;
 
+  const unreadNotifications = notifications.filter((n) => !n.read);
+  const deptHeadApprovedPendingEvents = pendingReviewEvents.filter(
+    (ev) => getFinanceClearanceDetails(ev, getEventPreScreen(ev), getEventTriage(ev)).state === "DEPT_HEAD_APPROVED"
+  );
+
+  const handleOpenEventInApprovals = (eventId: number, notificationId?: string) => {
+    if (notificationId) {
+      markNotificationRead(notificationId);
+      dismissToast(notificationId);
+    }
+    setShowNotificationDrawer(false);
+    setActiveNav("approvals");
+    setTriageTier("ALL");
+    const targetEv = events.find((ev) => ev.event_id === eventId);
+    if (targetEv && normalizedStatus(targetEv.status) !== "pending") {
+      setReviewFilter("ALL");
+    } else {
+      setReviewFilter("PENDING");
+    }
+    setSelectedEventId(eventId);
+  };
+
   const baseEventsList = reviewFilter === "PENDING" ? pendingReviewEvents : events;
 
   const triagedEvents = baseEventsList
     .map((item) => {
       const aiTriage = getEventTriage(item);
+      const aiPreScreen = getEventPreScreen(item);
       const effectiveTier =
         aiTriage?.priorityTier || item.urgency_tier || computeDynamicUrgency(item.event_date).tier;
       return {
         ...item,
+        ai_prescreen_result: aiPreScreen,
+        ai_triage_result: aiTriage,
         aiTriage,
         calculatedUrgency: getTierBadgeMeta(effectiveTier),
       };
@@ -709,7 +1071,22 @@ export function CoordinatorInterface({
         console.error("Error fetching queue from Supabase:", error.message);
         setDbError(`Supabase sync error: ${error.message}`);
       } else if (data) {
-        setEvents(data as EventRecord[]);
+        const fetched = data as EventRecord[];
+        if (hasHydratedQueueRef.current) {
+          for (const ev of fetched) {
+            detectDeptHeadApprovalTransition(ev);
+          }
+        } else {
+          for (const ev of fetched) {
+            const details = getFinanceClearanceDetails(ev);
+            prevDeptHeadStateRef.current.set(ev.event_id, {
+              status: details.deptHeadStatus,
+              approvedAt: details.deptHeadApprovedAt,
+            });
+          }
+          hasHydratedQueueRef.current = true;
+        }
+        setEvents(fetched);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not reach Supabase.";
@@ -923,9 +1300,35 @@ export function CoordinatorInterface({
       .channel("events-queue-channel")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "events" },
+        { event: "UPDATE", schema: "public", table: "events" },
+        (payload) => {
+          const updatedEv = payload.new as EventRecord | undefined;
+          const oldEv = payload.old as Partial<EventRecord> | undefined;
+          if (updatedEv && typeof updatedEv.event_id === "number") {
+            detectDeptHeadApprovalTransition(updatedEv, oldEv);
+            setEvents((prev) =>
+              prev.some((item) => item.event_id === updatedEv.event_id)
+                ? prev.map((item) =>
+                    item.event_id === updatedEv.event_id ? { ...item, ...updatedEv } : item
+                  )
+                : [updatedEv, ...prev]
+            );
+          }
+          void fetchQueue();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "events" },
         () => {
-          fetchQueue();
+          void fetchQueue();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "events" },
+        () => {
+          void fetchQueue();
         }
       )
       .on(
@@ -972,6 +1375,13 @@ export function CoordinatorInterface({
   const selectedAuditStatus = selectedPreScreen ? deriveAuditStatus(selectedPreScreen) : null;
   const selectedDefects = selectedPreScreen ? extractDefectItems(selectedPreScreen) : [];
   const selectedTriage = selectedEvent ? getEventTriage(selectedEvent) : undefined;
+  const selectedFinanceDetails = selectedEvent
+    ? getFinanceClearanceDetails(selectedEvent, selectedPreScreen, selectedTriage)
+    : null;
+  const selectedFinanceState: FinanceClearanceState = selectedEvent
+    ? getFinanceClearanceState(selectedEvent)
+    : "NOT_REQUIRED";
+  const isSelectedBlockedByDeptHead = selectedFinanceState === "AWAITING_DEPT_HEAD";
   const selectedRemoteDocs = selectedEvent
     ? remoteDocsByEvent[selectedEvent.event_id] || []
     : [];
@@ -981,6 +1391,70 @@ export function CoordinatorInterface({
       (isFreshProcessingState(selectedEvent.ai_audit_status, selectedEvent.created_at) ||
         isFreshProcessingState(decodedSelected.aiStatus, decodedSelected.aiUpdatedAt))
   );
+
+  const handleFlagForDeptHeadReview = async (ev: EventRecord) => {
+    setRoutingDeptHeadId(ev.event_id);
+    const decoded = decodeProposalDescription(ev.description);
+    const nowIso = new Date().toISOString();
+    const nextClearance: CarriedDeptHeadClearance = {
+      requiresDeptHeadReview: true,
+      status: "pending",
+      feedback: decoded.deptHeadClearance?.feedback ?? ev.dept_head_feedback ?? null,
+      approvedAt: null,
+      reviewedBy: null,
+      estimatedBudget: ev.estimated_budget ?? decoded.deptHeadClearance?.estimatedBudget ?? null,
+    };
+
+    const updatedDescription = encodeProposalDescriptionWithAttachments(decoded.cleanDescription, {
+      files: decoded.files,
+      preScreen: decoded.preScreen,
+      aiStatus: decoded.aiStatus,
+      aiUpdatedAt: decoded.aiUpdatedAt,
+      publishedSurvey: decoded.publishedSurvey,
+      emailDispatch: decoded.emailDispatch,
+      deptHeadClearance: nextClearance,
+    });
+
+    const { error: extErr } = await supabase
+      .from("events")
+      .update({
+        description: updatedDescription,
+        requires_dept_head_review: true,
+        dept_head_status: "pending",
+        updated_at: nowIso,
+      })
+      .eq("event_id", ev.event_id);
+
+    if (extErr) {
+      await supabase
+        .from("events")
+        .update({
+          description: updatedDescription,
+          updated_at: nowIso,
+        })
+        .eq("event_id", ev.event_id);
+    }
+
+    prevDeptHeadStateRef.current.set(ev.event_id, {
+      status: "pending",
+      approvedAt: null,
+    });
+
+    setEvents((prev) =>
+      prev.map((item) =>
+        item.event_id === ev.event_id
+          ? {
+              ...item,
+              description: updatedDescription,
+              requires_dept_head_review: true,
+              dept_head_status: "pending",
+              dept_head_approved_at: undefined,
+            }
+          : item
+      )
+    );
+    setRoutingDeptHeadId(null);
+  };
 
   const handleOpenRevisionWithAiDefects = (report: PreScreenResult) => {
     setRevisionFeedback(formatDefectsForRevisionNote(report));
@@ -1017,6 +1491,7 @@ export function CoordinatorInterface({
       aiUpdatedAt: new Date().toISOString(),
       publishedSurvey: decoded.publishedSurvey,
       emailDispatch: decoded.emailDispatch,
+      deptHeadClearance: decoded.deptHeadClearance,
     });
 
     const { error: extErr } = await supabase
@@ -1349,6 +1824,7 @@ export function CoordinatorInterface({
         publishedAt: new Date().toISOString(),
       },
       emailDispatch: decoded.emailDispatch,
+      deptHeadClearance: decoded.deptHeadClearance,
     });
 
     const { error: extErr } = await supabase
@@ -1457,6 +1933,7 @@ export function CoordinatorInterface({
             sentAt: dispatch.sent_at,
             errorMessage: dispatch.error_message,
           },
+          deptHeadClearance: decoded.deptHeadClearance,
         }
       );
       await supabase
@@ -1908,6 +2385,9 @@ export function CoordinatorInterface({
     feedback?: string
   ) => {
     if (!selectedEvent) return;
+    if (status === "approved" && getFinanceClearanceState(selectedEvent) === "AWAITING_DEPT_HEAD") {
+      return;
+    }
     setActionLoading(true);
 
     const dbStatus = status === "revision" ? "needs_revision" : status;
@@ -2316,24 +2796,153 @@ export function CoordinatorInterface({
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Crisp White Top Banner Header */}
         <header className="h-14 bg-white px-6 flex items-center justify-between text-xs text-[#18212F] z-30 border-b border-[#DDE2EA] shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[#5B6678]">Portal:</span>
-            <span className="font-bold text-[#24408E] uppercase tracking-wide">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[#5B6678] shrink-0">Portal:</span>
+            <span className="font-bold text-[#24408E] uppercase tracking-wide truncate">
               CampusSync Admin Portal | Tenant: Asia Pacific College
             </span>
           </div>
-          <button
-            onClick={() => {
-              fetchQueue();
-              fetchFacilitatorAccounts();
-              fetchAnnouncements();
-              void fetchSyndicationData();
-            }}
-            className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] text-[#18212F] border border-[#C9D0DB] font-medium flex items-center gap-1.5 cursor-pointer transition"
-          >
-            <RefreshCw className={`size-3.5 text-[#24408E] ${loading ? "animate-spin" : ""}`} />
-            Sync Queue
-          </button>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            {/* Real-Time Notification Bell & Dropdown Drawer */}
+            <div ref={notificationDrawerRef} className="relative">
+              <button
+                type="button"
+                aria-label="Coordinator Notifications"
+                onClick={() => setShowNotificationDrawer((prev) => !prev)}
+                className={`relative px-2.5 py-1.5 rounded-none border font-medium flex items-center gap-1.5 cursor-pointer transition ${
+                  showNotificationDrawer || unreadNotifications.length > 0
+                    ? "bg-[#EAEFFA] border-[#24408E] text-[#24408E]"
+                    : "bg-white hover:bg-[#F2F4F7] border-[#C9D0DB] text-[#18212F]"
+                }`}
+              >
+                <Bell className="size-3.5 text-[#24408E]" />
+                <span className="hidden sm:inline">Alerts</span>
+                {unreadNotifications.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-none bg-[#B3261E] text-white text-[10px] font-mono font-bold leading-none">
+                    {unreadNotifications.length}
+                  </span>
+                )}
+              </button>
+
+              {showNotificationDrawer && (
+                <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-2rem)] rounded-none bg-white border border-[#C5D3F3] shadow-xl z-50 text-left">
+                  <div className="px-4 py-3 bg-[#1C2D63] text-white flex items-center justify-between gap-2 border-b border-[#162452]">
+                    <div className="flex items-center gap-2">
+                      <Bell className="size-3.5 text-[#F2B84B]" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider">
+                        Coordinator Notifications
+                      </span>
+                      {unreadNotifications.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-none bg-[#F2B84B] text-[#1C2D63] text-[10px] font-mono font-bold">
+                          {unreadNotifications.length} NEW
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowNotificationDrawer(false)}
+                      aria-label="Close notifications"
+                      className="p-1 rounded-none text-[#B8C3E3] hover:text-white hover:bg-white/10 cursor-pointer"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-2 bg-[#F7F8FA] border-b border-[#DDE2EA] flex items-center justify-between text-[11px]">
+                    <span className="text-[#5B6678]">
+                      {notifications.length} notification{notifications.length === 1 ? "" : "s"}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      {unreadNotifications.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={markAllNotificationsRead}
+                          className="text-[#24408E] font-semibold hover:underline cursor-pointer"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                      {notifications.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearAllNotifications}
+                          className="text-[#B3261E] font-semibold hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-[#DDE2EA]">
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center space-y-1.5">
+                        <Bell className="size-6 mx-auto text-[#24408E]/25" />
+                        <p className="text-xs font-semibold text-[#18212F]">No notifications yet</p>
+                        <p className="text-[11px] text-[#5B6678]">
+                          Live alerts appear here as soon as the Department Head approves a proposal&apos;s budget.
+                        </p>
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          onClick={() => handleOpenEventInApprovals(notif.eventId, notif.id)}
+                          className={`p-3.5 cursor-pointer transition space-y-1.5 ${
+                            !notif.read
+                              ? "bg-[#E6F3EC]/60 hover:bg-[#E6F3EC] border-l-3 border-l-[#1F7A4D]"
+                              : "bg-white hover:bg-[#F7F8FA]"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#1F7A4D]">
+                              <CheckCircle2 className="size-3 shrink-0" />
+                              Dept Head Budget Approved
+                            </span>
+                            {!notif.read && (
+                              <span className="px-1.5 py-0.5 rounded-none bg-[#24408E] text-white text-[9px] font-mono font-bold">
+                                UNREAD
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[#18212F] leading-snug font-medium">
+                            {notif.message}
+                          </p>
+                          <div className="flex items-center justify-between text-[10px] text-[#5B6678] pt-0.5">
+                            <span className="font-mono">
+                              {new Date(notif.createdAt).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            <span className="font-semibold text-[#24408E] inline-flex items-center gap-1">
+                              Review Proposal <ArrowRight className="size-3" />
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                fetchQueue();
+                fetchFacilitatorAccounts();
+                fetchAnnouncements();
+                void fetchSyndicationData();
+              }}
+              className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] text-[#18212F] border border-[#C9D0DB] font-medium flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <RefreshCw className={`size-3.5 text-[#24408E] ${loading ? "animate-spin" : ""}`} />
+              Sync Queue
+            </button>
+          </div>
         </header>
 
         {dbError && (
@@ -2361,6 +2970,54 @@ export function CoordinatorInterface({
               </span>
               <span className="font-mono text-[10px] font-semibold uppercase">RA 8792 & RA 10173 Active</span>
             </div>
+
+            {/* Inline Notification Banner on Home View for Department Head Budget Approvals */}
+            {(unreadNotifications.length > 0 || deptHeadApprovedPendingEvents.length > 0) && (
+              <div className="rounded-none bg-[#E6F3EC] border border-[#B6DFC8] px-4 py-3.5 text-xs text-[#18212F] flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-start gap-2.5 text-left">
+                  <CheckCircle2 className="size-4 text-[#1F7A4D] shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1F7A4D]">
+                      {unreadNotifications.length > 0
+                        ? `Live Clearance Alert (${unreadNotifications.length} Unread)`
+                        : `${deptHeadApprovedPendingEvents.length} Budget-Cleared Proposal${deptHeadApprovedPendingEvents.length === 1 ? "" : "s"} Ready`}
+                    </div>
+                    <p className="text-xs font-medium text-[#18212F]">
+                      {unreadNotifications.length > 0
+                        ? unreadNotifications[0].message
+                        : `${deptHeadApprovedPendingEvents[0].title} budget has been reviewed and approved by the Department Head. Ready for Admin Coordinator final approval.`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (unreadNotifications.length > 0) {
+                        handleOpenEventInApprovals(
+                          unreadNotifications[0].eventId,
+                          unreadNotifications[0].id
+                        );
+                      } else if (deptHeadApprovedPendingEvents[0]) {
+                        handleOpenEventInApprovals(deptHeadApprovedPendingEvents[0].event_id);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-none bg-[#1F7A4D] hover:bg-[#17603B] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    Open in Pending Approvals <ArrowRight className="size-3.5" />
+                  </button>
+                  {unreadNotifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => markNotificationRead(unreadNotifications[0].id)}
+                      className="px-2.5 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#B6DFC8] text-[#1F7A4D] text-[11px] font-semibold cursor-pointer"
+                    >
+                      Mark Read
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-5 rounded-none bg-white border border-[#DDE2EA] shadow-xs text-left">
@@ -2455,7 +3112,42 @@ export function CoordinatorInterface({
 
         {/* ── TAB 2: PENDING APPROVALS (EVENT QUEUEING & REVIEW) ── */}
         {activeNav === "approvals" && (
-          <div className="flex-1 flex h-full w-full overflow-hidden bg-[#F2F4F7] text-[#18212F]">
+          <div className="flex-1 flex flex-col h-full w-full overflow-hidden bg-[#F2F4F7] text-[#18212F]">
+            {/* Inline Notification Banner on Pending Approvals View */}
+            {unreadNotifications.length > 0 && (
+              <div className="px-5 py-2.5 bg-[#E6F3EC] border-b border-[#B6DFC8] text-xs text-[#18212F] flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Bell className="size-3.5 text-[#1F7A4D] shrink-0" />
+                  <span className="font-mono text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-none bg-[#1F7A4D] text-white shrink-0">
+                    DEPT HEAD CLEARED
+                  </span>
+                  <span className="font-medium truncate">{unreadNotifications[0].message}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleOpenEventInApprovals(
+                        unreadNotifications[0].eventId,
+                        unreadNotifications[0].id
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-none bg-[#1F7A4D] hover:bg-[#17603B] text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition"
+                  >
+                    Jump to Proposal <ArrowRight className="size-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => markNotificationRead(unreadNotifications[0].id)}
+                    className="px-2 py-1 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#B6DFC8] text-[#1F7A4D] text-[11px] font-semibold cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 flex min-h-0 w-full overflow-hidden">
             {/* LEFT COLUMN: Event Queue List */}
             <div className="w-[390px] border-r border-[#DDE2EA] flex flex-col h-full bg-white shrink-0">
               <div className="p-4 border-b border-[#DDE2EA] space-y-3">
@@ -2568,6 +3260,8 @@ export function CoordinatorInterface({
                   const urgency = item.calculatedUrgency;
                   const aiTriage = item.aiTriage;
                   const isRationaleOpen = Boolean(expandedTriageIds[item.event_id]);
+                  const financeDetails = getFinanceClearanceDetails(item);
+                  const financeState = getFinanceClearanceState(item);
 
                   return (
                     <div
@@ -2618,6 +3312,29 @@ export function CoordinatorInterface({
                           <Building2 className="size-3 text-[#24408E]" /> {item.venue || "No venue"}
                         </span>
                       </div>
+
+                      {/* Two-Stage Department Head Budget Review Queue Card Badge */}
+                      {financeState === "AWAITING_DEPT_HEAD" && (
+                        <div className="mt-2 px-2 py-1.5 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-[#8A5A00] flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono font-bold tracking-wide flex items-center gap-1.5 leading-tight">
+                            <ShieldAlert className="size-3.5 shrink-0 text-[#B45309]" />
+                            REQUIRED: DEPT HEAD BUDGET REVIEW
+                          </span>
+                          {financeDetails.estimatedBudget != null && financeDetails.estimatedBudget > 0 && (
+                            <span className="text-[10px] font-mono font-bold text-[#6B4600] shrink-0">
+                              {formatCurrencyPhp(financeDetails.estimatedBudget)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {financeState === "DEPT_HEAD_APPROVED" && (
+                        <div className="mt-2 px-2 py-1.5 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-[#1F7A4D] flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono font-bold tracking-wide leading-tight">
+                            ✓ DEPT HEAD APPROVED — READY FOR ADMIN CLEARANCE
+                          </span>
+                        </div>
+                      )}
 
                       {aiTriage && (
                         <div className="mt-2 pt-2 border-t border-[#DDE2EA] space-y-1.5">
@@ -2793,6 +3510,186 @@ export function CoordinatorInterface({
                       </div>
                     </div>
                   </div>
+
+                  {/* Two-Stage Department Head Financial & Budget Clearance Status Block */}
+                  {selectedFinanceDetails && (
+                    <div
+                      className={`rounded-none bg-white border shadow-xs p-5 space-y-3.5 ${
+                        selectedFinanceState === "AWAITING_DEPT_HEAD"
+                          ? "border-[#E5C98B]"
+                          : selectedFinanceState === "DEPT_HEAD_APPROVED"
+                          ? "border-[#B6DFC8]"
+                          : "border-[#DDE2EA]"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE2EA] pb-3">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="size-4 text-[#24408E]" />
+                          <h3 className="text-xs font-bold text-[#18212F] uppercase tracking-wider">
+                            Department Head Financial & Budget Clearance
+                          </h3>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {selectedFinanceState === "AWAITING_DEPT_HEAD" && (
+                            <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-none bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] uppercase">
+                              <Clock className="size-3 shrink-0" />
+                              {selectedFinanceDetails.deptHeadStatus === "revision"
+                                ? "Dept Head: Revision Requested"
+                                : selectedFinanceDetails.deptHeadStatus === "rejected"
+                                ? "Dept Head: Budget Rejected"
+                                : "Awaiting Dept Head Approval"}
+                            </span>
+                          )}
+                          {selectedFinanceState === "DEPT_HEAD_APPROVED" && (
+                            <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-none bg-[#E6F3EC] text-[#1F7A4D] border border-[#B6DFC8] uppercase">
+                              <CheckCircle2 className="size-3 shrink-0" />
+                              Dept Head Approved
+                            </span>
+                          )}
+                          {selectedFinanceState === "NOT_REQUIRED" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-none bg-[#F2F4F7] text-[#5B6678] border border-[#DDE2EA] uppercase">
+                              Budget Audit Not Triggered
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div className="p-3 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <p className="text-[10px] font-mono uppercase text-[#5B6678] mb-1">
+                            Proposed Budget
+                          </p>
+                          <p className="text-sm font-bold text-[#18212F] font-mono">
+                            {selectedFinanceDetails.estimatedBudget != null &&
+                            selectedFinanceDetails.estimatedBudget > 0
+                              ? formatCurrencyPhp(selectedFinanceDetails.estimatedBudget)
+                              : "₱0.00 (None Declared)"}
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <p className="text-[10px] font-mono uppercase text-[#5B6678] mb-1">
+                            Stage 1: Dept Head Review
+                          </p>
+                          <p
+                            className={`text-sm font-bold ${
+                              selectedFinanceState === "DEPT_HEAD_APPROVED"
+                                ? "text-[#1F7A4D]"
+                                : selectedFinanceState === "AWAITING_DEPT_HEAD"
+                                ? "text-[#8A5A00]"
+                                : "text-[#5B6678]"
+                            }`}
+                          >
+                            {selectedFinanceState === "DEPT_HEAD_APPROVED"
+                              ? "Approved & Cleared"
+                              : selectedFinanceDetails.deptHeadStatus === "revision"
+                              ? "Returned for Revision"
+                              : selectedFinanceDetails.deptHeadStatus === "rejected"
+                              ? "Rejected"
+                              : selectedFinanceState === "AWAITING_DEPT_HEAD"
+                              ? "Pending Review"
+                              : "Not Required"}
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-none bg-[#F7F8FA] border border-[#DDE2EA]">
+                          <p className="text-[10px] font-mono uppercase text-[#5B6678] mb-1">
+                            Stage 2: Admin Sign-Off
+                          </p>
+                          <p
+                            className={`text-sm font-bold ${
+                              selectedFinanceState === "AWAITING_DEPT_HEAD"
+                                ? "text-[#B3261E]"
+                                : "text-[#1F7A4D]"
+                            }`}
+                          >
+                            {selectedFinanceState === "AWAITING_DEPT_HEAD"
+                              ? "Locked (Pending Stage 1)"
+                              : "Unlocked — Ready"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {selectedFinanceState === "AWAITING_DEPT_HEAD" && (
+                        <div className="p-3.5 rounded-none bg-[#FFF4DC] border border-[#E5C98B] text-xs text-[#8A5A00] space-y-1.5">
+                          <div className="font-bold flex items-center gap-1.5 text-[#6B4600]">
+                            <ShieldAlert className="size-4 shrink-0 text-[#B45309]" />
+                            Blocked: Budget audit requires Department Head approval before Admin Coordinator sign-off.
+                          </div>
+                          {selectedFinanceDetails.triggerReasons.length > 0 && (
+                            <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-[#8A5A00]">
+                              {selectedFinanceDetails.triggerReasons.map((reason, idx) => (
+                                <li key={idx}>{reason}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+
+                      {selectedFinanceState === "DEPT_HEAD_APPROVED" && (
+                        <div className="p-3.5 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-xs text-[#1F7A4D] space-y-1">
+                          <div className="font-bold flex items-center gap-1.5">
+                            <CheckCircle2 className="size-4 shrink-0" />
+                            Department Head Budget Review Approved — Ready for Final Admin Coordinator Sign-Off.
+                          </div>
+                          {(selectedFinanceDetails.deptHeadApprovedAt ||
+                            selectedFinanceDetails.deptHeadReviewedBy) && (
+                            <p className="text-[11px] text-[#1B5E3C] font-mono">
+                              Cleared
+                              {selectedFinanceDetails.deptHeadReviewedBy
+                                ? ` by ${selectedFinanceDetails.deptHeadReviewedBy}`
+                                : ""}
+                              {selectedFinanceDetails.deptHeadApprovedAt
+                                ? ` on ${new Date(
+                                    selectedFinanceDetails.deptHeadApprovedAt
+                                  ).toLocaleString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}`
+                                : ""}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {selectedFinanceDetails.deptHeadFeedback && (
+                        <div className="p-3.5 rounded-none bg-[#F7F9FF] border border-[#C5D3F3] text-xs space-y-1">
+                          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#24408E]">
+                            Department Head Remarks
+                          </div>
+                          <p className="text-[#18212F] leading-relaxed whitespace-pre-line">
+                            {selectedFinanceDetails.deptHeadFeedback}
+                          </p>
+                        </div>
+                      )}
+
+                      {selectedFinanceState === "NOT_REQUIRED" &&
+                        normalizedStatus(selectedEvent.status) === "pending" && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+                            <span className="text-[#5B6678] text-[11px]">
+                              No proposed budget or financial audit flag detected. You can still route this proposal for Department Head budget verification if needed.
+                            </span>
+                            <button
+                              type="button"
+                              disabled={routingDeptHeadId === selectedEvent.event_id}
+                              onClick={() => void handleFlagForDeptHeadReview(selectedEvent)}
+                              className="px-3 py-1.5 rounded-none bg-[#FFF4DC] hover:bg-[#FCE8B6] border border-[#E5C98B] text-[#8A5A00] text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
+                            >
+                              {routingDeptHeadId === selectedEvent.event_id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <ShieldAlert className="size-3.5" />
+                              )}
+                              Flag for Dept Head Budget Review
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  )}
 
                   {/* 100% Automated Jira-Style AI Executive Summary & Document Verification */}
                   <div className="rounded-none bg-white border border-[#C5D3F3] shadow-xs p-5 space-y-4">
@@ -3217,8 +4114,18 @@ export function CoordinatorInterface({
                 {/* Fixed Decision Footer Actions (only shown for pending proposals awaiting review) */}
                 {normalizedStatus(selectedEvent.status) === "pending" ? (
                   <div className="p-4 md:p-5 border-t border-[#DDE2EA] bg-white flex flex-wrap items-center justify-between gap-3 sticky bottom-0">
-                    <div className="text-xs">
-                      {selectedAuditStatus === "DEFECTIVE" ? (
+                    <div className="text-xs max-w-xl">
+                      {isSelectedBlockedByDeptHead ? (
+                        <span className="text-[#8A5A00] font-semibold flex items-center gap-1.5">
+                          <Lock className="size-3.5 shrink-0 text-[#B45309]" />
+                          Blocked: Budget audit requires Department Head approval before Admin Coordinator sign-off.
+                        </span>
+                      ) : selectedFinanceState === "DEPT_HEAD_APPROVED" ? (
+                        <span className="text-[#1F7A4D] font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3.5 shrink-0" />
+                          Department Head Budget Review Approved — Ready for Final Admin Coordinator Sign-Off.
+                        </span>
+                      ) : selectedAuditStatus === "DEFECTIVE" ? (
                         <span className="text-[#B3261E] font-medium flex items-center gap-1.5">
                           <AlertTriangle className="size-3.5 shrink-0" />
                           AI audit recommends requesting revisions or rejecting due to detected defects.
@@ -3263,16 +4170,28 @@ export function CoordinatorInterface({
                       </button>
                       <button
                         onClick={() => handleUpdateStatus("approved")}
-                        disabled={actionLoading}
-                        className={`px-5 py-2 rounded-none text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer ${
-                          selectedAuditStatus === "COMPLETE"
-                            ? "bg-[#1F7A4D] hover:bg-[#17603B] text-white shadow-sm"
+                        disabled={actionLoading || isSelectedBlockedByDeptHead}
+                        title={
+                          isSelectedBlockedByDeptHead
+                            ? "Blocked: Budget audit requires Department Head approval before Admin Coordinator sign-off."
+                            : "Approve & Sign (SHA-256)"
+                        }
+                        className={`px-5 py-2 rounded-none text-xs font-semibold transition-all flex items-center gap-2 ${
+                          isSelectedBlockedByDeptHead
+                            ? "bg-[#E5E9F0] text-[#5B6678] border border-[#C9D0DB] cursor-not-allowed opacity-75"
+                            : selectedFinanceState === "DEPT_HEAD_APPROVED" ||
+                              selectedAuditStatus === "COMPLETE"
+                            ? "bg-[#1F7A4D] hover:bg-[#17603B] text-white shadow-sm cursor-pointer disabled:opacity-50"
                             : selectedAuditStatus === "DEFECTIVE"
-                            ? "border border-[#C9D0DB] bg-white text-[#18212F] hover:bg-[#F2F4F7]"
-                            : "bg-[#24408E] hover:bg-[#1B3270] text-white shadow-xs"
+                            ? "border border-[#C9D0DB] bg-white text-[#18212F] hover:bg-[#F2F4F7] cursor-pointer disabled:opacity-50"
+                            : "bg-[#24408E] hover:bg-[#1B3270] text-white shadow-xs cursor-pointer disabled:opacity-50"
                         }`}
                       >
-                        <CheckCircle2 className="size-4" />
+                        {isSelectedBlockedByDeptHead ? (
+                          <Lock className="size-3.5" />
+                        ) : (
+                          <CheckCircle2 className="size-4" />
+                        )}
                         Approve & Sign (SHA-256)
                       </button>
                     </div>
@@ -3321,6 +4240,7 @@ export function CoordinatorInterface({
                 )}
               </div>
             )}
+            </div>
           </div>
         )}
 
@@ -4439,6 +5359,48 @@ export function CoordinatorInterface({
               : undefined
           }
         />
+      )}
+
+      {/* Real-Time Toast Alerts for Department Head Budget Approvals */}
+      {activeToasts.length > 0 && (
+        <div
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 w-[380px] max-w-[calc(100vw-2.5rem)] space-y-2.5"
+        >
+          {activeToasts.map((toast) => (
+            <div
+              key={toast.id}
+              className="rounded-none bg-white border border-[#1F7A4D] border-l-4 border-l-[#1F7A4D] shadow-xl p-4 text-left space-y-2"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[#1F7A4D]">
+                  <CheckCircle2 className="size-3.5 shrink-0" />
+                  Department Head Budget Approved
+                </span>
+                <button
+                  type="button"
+                  aria-label="Dismiss alert"
+                  onClick={() => dismissToast(toast.id)}
+                  className="p-0.5 rounded-none text-[#5B6678] hover:text-[#18212F] hover:bg-[#F2F4F7] cursor-pointer"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <p className="text-xs text-[#18212F] leading-relaxed font-medium">
+                {toast.message}
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEventInApprovals(toast.eventId, toast.id)}
+                  className="px-3 py-1.5 rounded-none bg-[#1F7A4D] hover:bg-[#17603B] text-white text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  Review & Finalize <ArrowRight className="size-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
