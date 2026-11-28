@@ -1505,7 +1505,7 @@ function ProposalApprovalsView({
                       <span
                         title={
                           item.aiTriage
-                            ? `AI Triage (${item.aiTriage.priorityTier}, Complexity ${item.aiTriage.complexityScore}/10): ${item.aiTriage.rationale}`
+                            ? `Check-up (${item.aiTriage.priorityTier}, Complexity ${item.aiTriage.complexityScore}/10): ${item.aiTriage.rationale}`
                             : "Lead-time urgency estimate"
                         }
                         className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${item.u.badgeCls}`}
@@ -1518,28 +1518,26 @@ function ProposalApprovalsView({
                     </span>
                   </div>
 
-                  {finMeta.requiresBudgetReview && finMeta.deptHeadStatus !== "approved" && (
-                    <div className="mt-2 flex items-center justify-between gap-2 rounded bg-[#FFF4DC] border border-[#E5C98B] px-2 py-1 text-[11px] font-medium text-[#8A5A00]">
-                      <span className="flex items-center gap-1">
-                        <ShieldAlert className="size-3 shrink-0" />
-                        Budget Review Required
-                      </span>
-                      {finMeta.estimatedBudget != null && finMeta.estimatedBudget > 0 && (
-                        <span className="font-mono font-semibold">
-                          {formatPhpBudget(finMeta.estimatedBudget)}
+                  {item.status === "pending" &&
+                    finMeta.requiresBudgetReview &&
+                    finMeta.deptHeadStatus !== "approved" && (
+                      <div className="mt-2 flex items-center justify-between gap-2 rounded bg-[#FFF4DC] border border-[#E5C98B] px-2 py-1 text-[11px] font-medium text-[#8A5A00]">
+                        <span className="flex items-center gap-1">
+                          <ShieldAlert className="size-3 shrink-0" />
+                          Budget Review Required
                         </span>
-                      )}
-                    </div>
-                  )}
+                        {finMeta.estimatedBudget != null && finMeta.estimatedBudget > 0 && (
+                          <span className="font-mono font-semibold">
+                            {formatPhpBudget(finMeta.estimatedBudget)}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                  {finMeta.deptHeadStatus === "approved" && (
+                  {item.status === "pending" && finMeta.deptHeadStatus === "approved" && (
                     <div className="mt-2 flex items-center gap-1.5 rounded bg-[#E6F3EC] border border-[#B6DFC8] px-2 py-1 text-[11px] font-medium text-[#1F7A4D]">
                       <CheckCircle2 className="size-3 shrink-0" />
-                      <span>
-                        {item.status === "pending"
-                          ? "Budget Approved · Forwarded to Admin"
-                          : "Budget Approved"}
-                      </span>
+                      <span>Budget Reviewed · Awaiting Admin Final Approval</span>
                     </div>
                   )}
 
@@ -1556,7 +1554,7 @@ function ProposalApprovalsView({
                         }}
                         className="flex w-full items-center justify-between text-[11px] font-medium text-[#24408E] hover:underline cursor-pointer"
                       >
-                        <span>AI triage rationale</span>
+                        <span>Event rationale</span>
                         {isTriageOpen ? (
                           <ChevronUp className="size-3.5" />
                         ) : (
@@ -1616,7 +1614,7 @@ function ProposalApprovalsView({
                 ) : (
                   <Sparkles className="size-4 text-[#24408E]" aria-hidden="true" />
                 )}
-                AI Triage
+                Check-up
               </button>
             </header>
 
@@ -1624,7 +1622,7 @@ function ProposalApprovalsView({
               <section className="rounded-md border border-[#DDE2EA] bg-white p-4 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-[#24408E] flex items-center gap-1.5">
-                    <Sparkles className="size-3.5" aria-hidden="true" /> AI Priority Queue Triage
+                    <Sparkles className="size-3.5" aria-hidden="true" /> Priority Queue Rationale
                   </h3>
                   <span className="text-xs font-medium text-[#5B6678]">
                     Complexity: <strong className="text-[#18212F]">{selectedTriage.complexityScore} / 10</strong>
@@ -1673,9 +1671,13 @@ function ProposalApprovalsView({
                     <Wallet className="size-3.5" aria-hidden="true" />
                     Stage 1: Department Head Budget &amp; Financial Clearance
                   </h3>
-                  {selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                  {selected.status === "approved" || selected.status === "completed" ? (
                     <span className="rounded bg-[#E6F3EC] px-2 py-0.5 text-xs font-semibold text-[#1F7A4D]">
-                      Approved · Forwarded to Admin Coordinator
+                      Finalized by Admin Coordinator
+                    </span>
+                  ) : selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                    <span className="rounded bg-[#E6F3EC] px-2 py-0.5 text-xs font-semibold text-[#1F7A4D]">
+                      Budget Reviewed · Awaiting Admin Final Approval
                     </span>
                   ) : selectedFinanceMeta.requiresBudgetReview ? (
                     <span className="rounded bg-[#FFF4DC] px-2 py-0.5 text-xs font-semibold text-[#8A5A00]">
@@ -1688,11 +1690,23 @@ function ProposalApprovalsView({
                   )}
                 </div>
 
-                {selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                {selected.status === "approved" || selected.status === "completed" ? (
                   <div className="rounded bg-[#E6F3EC] border border-[#B6DFC8] px-3 py-2.5 text-xs text-[#1F7A4D] space-y-1">
                     <p className="font-semibold flex items-center gap-1.5">
                       <CheckCircle2 className="size-3.5 shrink-0" />
-                      Budget review approved. The Admin Coordinator has been notified for final SHA-256 sign-off.
+                      This proposal has received final Admin Coordinator approval.
+                    </p>
+                    {selectedFinanceMeta.deptHeadFeedback && (
+                      <p className="text-[#1B5E3C]">
+                        Remarks: {selectedFinanceMeta.deptHeadFeedback}
+                      </p>
+                    )}
+                  </div>
+                ) : selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                  <div className="rounded bg-[#E6F3EC] border border-[#B6DFC8] px-3 py-2.5 text-xs text-[#1F7A4D] space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="size-3.5 shrink-0" />
+                      Dept Head budget has been reviewed. The Admin Coordinator has been notified for final approval (still Pending until Admin signs off).
                     </p>
                     {selectedFinanceMeta.deptHeadFeedback && (
                       <p className="text-[#1B5E3C]">
@@ -1703,7 +1717,7 @@ function ProposalApprovalsView({
                 ) : selected.status === "pending" ? (
                   <div className="space-y-2">
                     <p className="text-xs text-[#5B6678]">
-                      Approving here clears Stage 1 (Department Head financial audit) and notifies the Admin Coordinator to unlock final SHA-256 clearance.
+                      Endorsing here only marks the Department Head budget review as complete (the proposal stays Pending until the Admin Coordinator gives final approval).
                     </p>
                     <div>
                       <label
