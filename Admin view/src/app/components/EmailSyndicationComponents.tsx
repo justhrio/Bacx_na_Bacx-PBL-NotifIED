@@ -71,7 +71,7 @@ export function EmailPreviewModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18212F]/60 backdrop-blur-xs">
-      <div className="w-full max-w-4xl max-h-[92vh] rounded-lg bg-white border border-[#DDE2EA] shadow-2xl flex flex-col overflow-hidden text-left">
+      <div className="w-full max-w-4xl max-h-[92vh] rounded-none bg-white border border-[#DDE2EA] shadow-2xl flex flex-col overflow-hidden text-left">
         {/* Modal Header */}
         <div className="px-6 py-4 bg-[#1C2D63] text-white flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -81,7 +81,7 @@ export function EmailPreviewModal({
                 Institutional Email Syndication Preview
               </span>
               {isSandbox && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FFF4DC] text-[#8A5A00] text-[10px] font-bold">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none bg-[#FFF4DC] text-[#8A5A00] text-[10px] font-bold">
                   <FlaskConical className="size-3" /> Sandbox Preview
                 </span>
               )}
@@ -93,7 +93,7 @@ export function EmailPreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded text-white/70 hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
+            className="p-1.5 rounded-none text-white/70 hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
           >
             <X className="size-4" />
           </button>
@@ -103,7 +103,7 @@ export function EmailPreviewModal({
         <div className="px-6 py-3 bg-[#F7F8FA] border-b border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
           <div className="flex flex-wrap items-center gap-3">
             <span
-              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-none text-[11px] font-bold border ${
                 dispatch.status === "SENT"
                   ? isSandbox
                     ? "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
@@ -136,11 +136,11 @@ export function EmailPreviewModal({
             )}
           </div>
 
-          <div className="flex items-center gap-1 bg-white p-0.5 rounded border border-[#DDE2EA] text-[11px]">
+          <div className="flex items-center gap-1 bg-white p-0.5 rounded-none border border-[#DDE2EA] text-[11px]">
             <button
               type="button"
               onClick={() => setViewMode("html")}
-              className={`px-2.5 py-1 rounded font-semibold cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-none font-semibold cursor-pointer transition ${
                 viewMode === "html"
                   ? "bg-[#24408E] text-white"
                   : "text-[#5B6678] hover:text-[#18212F]"
@@ -151,7 +151,7 @@ export function EmailPreviewModal({
             <button
               type="button"
               onClick={() => setViewMode("text")}
-              className={`px-2.5 py-1 rounded font-semibold cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-none font-semibold cursor-pointer transition ${
                 viewMode === "text"
                   ? "bg-[#24408E] text-white"
                   : "text-[#5B6678] hover:text-[#18212F]"
@@ -174,7 +174,7 @@ export function EmailPreviewModal({
                 href={dispatch.preview_url}
                 target="_blank"
                 rel="noreferrer"
-                className="px-2.5 py-1 rounded bg-white hover:bg-[#F7F8FA] border border-[#E5C98B] text-[#8A5A00] font-semibold text-[11px] flex items-center gap-1 shrink-0"
+                className="px-2.5 py-1 rounded-none bg-white hover:bg-[#F7F8FA] border border-[#E5C98B] text-[#8A5A00] font-semibold text-[11px] flex items-center gap-1 shrink-0"
               >
                 Open Ethereal Test Inbox <ExternalLink className="size-3" />
               </a>
@@ -194,7 +194,7 @@ export function EmailPreviewModal({
                 type="button"
                 disabled={retrying}
                 onClick={onRetry}
-                className="px-3 py-1.5 rounded bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                className="px-3 py-1.5 rounded-none bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
               >
                 {retrying ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -215,15 +215,15 @@ export function EmailPreviewModal({
                 title="Institutional Email Preview"
                 srcDoc={dispatch.email_html_preview}
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
-                className="w-full min-h-[480px] h-[54vh] bg-white rounded-md border border-[#DDE2EA] shadow-xs"
+                className="w-full min-h-[480px] h-[54vh] bg-white rounded-none border border-[#DDE2EA] shadow-xs"
               />
             ) : (
-              <div className="p-10 rounded-md bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
+              <div className="p-10 rounded-none bg-white border border-[#DDE2EA] text-center text-xs text-[#5B6678]">
                 HTML email preview is not available for this dispatch record.
               </div>
             )
           ) : (
-            <pre className="p-5 rounded-md bg-white border border-[#DDE2EA] text-xs text-[#18212F] font-mono whitespace-pre-wrap leading-relaxed">
+            <pre className="p-5 rounded-none bg-white border border-[#DDE2EA] text-xs text-[#18212F] font-mono whitespace-pre-wrap leading-relaxed">
               {dispatch.email_text_fallback || "No plain-text fallback captured."}
             </pre>
           )}
@@ -256,7 +256,7 @@ export function EmailPreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold cursor-pointer"
+            className="px-4 py-1.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold cursor-pointer"
           >
             Close Preview
           </button>
@@ -303,7 +303,7 @@ export function EmailSyndicationStatusCard({
 
   return (
     <div
-      className={`rounded-lg border text-xs space-y-2.5 ${
+      className={`rounded-none border text-xs space-y-2.5 ${
         compact ? "p-3.5" : "p-4"
       } ${
         effectiveStatus === "SENT"
@@ -348,12 +348,12 @@ export function EmailSyndicationStatusCard({
 
         <div className="flex items-center gap-1.5">
           {effectiveStatus === "SENT" && isSandbox && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] uppercase">
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-none bg-[#FFF4DC] text-[#8A5A00] border border-[#E5C98B] uppercase">
               <FlaskConical className="size-3" /> Sandbox Preview
             </span>
           )}
           <span
-            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded uppercase border ${
+            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-none uppercase border ${
               effectiveStatus === "SENT"
                 ? isSandbox
                   ? "bg-white text-[#8A5A00] border-[#E5C98B]"
@@ -380,12 +380,12 @@ export function EmailSyndicationStatusCard({
 
       {/* Lifecycle Mini Stepper */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[#5B6678]">
-        <span className="px-1.5 py-0.5 rounded bg-[#E6F3EC] text-[#1F7A4D] font-semibold">
+        <span className="px-1.5 py-0.5 rounded-none bg-[#E6F3EC] text-[#1F7A4D] font-semibold">
           1. Approved (SHA-256)
         </span>
         <span>→</span>
         <span
-          className={`px-1.5 py-0.5 rounded font-semibold ${
+          className={`px-1.5 py-0.5 rounded-none font-semibold ${
             surveyUrl || dispatch?.survey_url
               ? "bg-[#E6F3EC] text-[#1F7A4D]"
               : "bg-white border border-[#DDE2EA] text-[#5B6678]"
@@ -395,7 +395,7 @@ export function EmailSyndicationStatusCard({
         </span>
         <span>→</span>
         <span
-          className={`px-1.5 py-0.5 rounded font-semibold ${
+          className={`px-1.5 py-0.5 rounded-none font-semibold ${
             effectiveStatus === "SENT"
               ? isSandbox
                 ? "bg-[#FFF4DC] text-[#8A5A00]"
@@ -420,7 +420,7 @@ export function EmailSyndicationStatusCard({
             <button
               type="button"
               onClick={onOpenSurveyTab}
-              className="px-3 py-1.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0"
+              className="px-3 py-1.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               <Send className="size-3" /> Generate Survey &amp; Syndicate
             </button>
@@ -429,13 +429,13 @@ export function EmailSyndicationStatusCard({
       )}
 
       {effectiveStatus === "FAILED" && dispatch?.error_message && (
-        <p className="text-[11px] text-[#8C1D18] bg-white/80 p-2.5 rounded border border-[#E2B3AF] leading-relaxed">
+        <p className="text-[11px] text-[#8C1D18] bg-white/80 p-2.5 rounded-none border border-[#E2B3AF] leading-relaxed">
           {dispatch.error_message}
         </p>
       )}
 
       {(surveyUrl || dispatch?.survey_url) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded bg-white border border-[#DDE2EA] text-[11px]">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-none bg-white border border-[#DDE2EA] text-[11px]">
           <div className="min-w-0 flex-1">
             <span className="text-[10px] font-mono uppercase text-[#5B6678] block">
               Public Post-Event Survey Link (No Student Login)
@@ -453,7 +453,7 @@ export function EmailSyndicationStatusCard({
             <button
               type="button"
               onClick={() => copyLink(surveyUrl || dispatch?.survey_url || "")}
-              className="px-2 py-1 rounded bg-[#F2F4F7] hover:bg-[#EAEFFA] border border-[#DDE2EA] text-[#18212F] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+              className="px-2 py-1 rounded-none bg-[#F2F4F7] hover:bg-[#EAEFFA] border border-[#DDE2EA] text-[#18212F] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
             >
               <Copy className="size-3" /> {copied ? "Copied" : "Copy"}
             </button>
@@ -461,7 +461,7 @@ export function EmailSyndicationStatusCard({
               href={surveyUrl || dispatch?.survey_url || "#"}
               target="_blank"
               rel="noreferrer"
-              className="px-2 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1"
+              className="px-2 py-1 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1"
             >
               Open <ExternalLink className="size-3" />
             </a>
@@ -489,7 +489,7 @@ export function EmailSyndicationStatusCard({
                 href={dispatch.preview_url}
                 target="_blank"
                 rel="noreferrer"
-                className="px-3 py-1.5 rounded-md bg-white hover:bg-[#FFF4DC] border border-[#E5C98B] text-[#8A5A00] text-[11px] font-semibold flex items-center gap-1.5 transition"
+                className="px-3 py-1.5 rounded-none bg-white hover:bg-[#FFF4DC] border border-[#E5C98B] text-[#8A5A00] text-[11px] font-semibold flex items-center gap-1.5 transition"
               >
                 <FlaskConical className="size-3.5" /> Open Ethereal Inbox <ExternalLink className="size-3" />
               </a>
@@ -498,7 +498,7 @@ export function EmailSyndicationStatusCard({
               <button
                 type="button"
                 onClick={() => onPreview(dispatch)}
-                className="px-3 py-1.5 rounded-md bg-white hover:bg-[#EAEFFA] border border-[#C5D3F3] text-[#24408E] text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                className="px-3 py-1.5 rounded-none bg-white hover:bg-[#EAEFFA] border border-[#C5D3F3] text-[#24408E] text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition"
               >
                 <Eye className="size-3.5" /> Preview Dispatched Email
               </button>
@@ -508,7 +508,7 @@ export function EmailSyndicationStatusCard({
                 type="button"
                 disabled={isSending}
                 onClick={onRetry}
-                className="px-3 py-1.5 rounded-md bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
+                className="px-3 py-1.5 rounded-none bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
               >
                 {isSending ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -626,7 +626,7 @@ export function InstitutionalMailingListView({
           {emailProvider && (
             <span
               title={emailProvider.detail}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-none text-[11px] font-semibold border flex items-center gap-1.5 ${
                 emailProvider.configured
                   ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8]"
                   : "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
@@ -645,7 +645,7 @@ export function InstitutionalMailingListView({
           <button
             type="button"
             onClick={() => void onRefresh()}
-            className="px-3 py-1.5 rounded-md bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#18212F] flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-none bg-white hover:bg-[#F2F4F7] border border-[#C9D0DB] text-xs font-semibold text-[#18212F] flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`size-3.5 text-[#24408E] ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -655,22 +655,22 @@ export function InstitutionalMailingListView({
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+        <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs">
           <div className="text-[10px] font-mono uppercase text-[#5B6678]">Student Distribution Lists</div>
           <div className="text-2xl font-black text-[#24408E] mt-1">{activeStudents}</div>
           <div className="text-[11px] text-[#5B6678]">Active student group aliases</div>
         </div>
-        <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+        <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs">
           <div className="text-[10px] font-mono uppercase text-[#5B6678]">Faculty Distribution Lists</div>
           <div className="text-2xl font-black text-[#24408E] mt-1">{activeFaculty}</div>
           <div className="text-[11px] text-[#5B6678]">Active faculty &amp; adviser lists</div>
         </div>
-        <div className="p-4 rounded-lg bg-white border border-[#DDE2EA] shadow-xs">
+        <div className="p-4 rounded-none bg-white border border-[#DDE2EA] shadow-xs">
           <div className="text-[10px] font-mono uppercase text-[#5B6678]">Staff &amp; All-Campus Lists</div>
           <div className="text-2xl font-black text-[#18212F] mt-1">{activeOther}</div>
           <div className="text-[11px] text-[#5B6678]">Campus-wide &amp; staff aliases</div>
         </div>
-        <div className="p-4 rounded-lg bg-white border border-[#B6DFC8] shadow-xs">
+        <div className="p-4 rounded-none bg-white border border-[#B6DFC8] shadow-xs">
           <div className="text-[10px] font-mono uppercase text-[#5B6678]">Dispatched Announcements</div>
           <div className="text-2xl font-black text-[#1F7A4D] mt-1">{sentDispatchesCount}</div>
           <div className="text-[11px] text-[#1F7A4D]/80">BCC-protected group pushes</div>
@@ -679,7 +679,7 @@ export function InstitutionalMailingListView({
 
       {/* Add Distribution List Form + Distribution Directory Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 rounded-lg bg-white border border-[#C5D3F3] p-5 shadow-xs h-fit space-y-4">
+        <div className="lg:col-span-4 rounded-none bg-white border border-[#C5D3F3] p-5 shadow-xs h-fit space-y-4">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-1.5">
             <Plus className="size-4" /> Add Distribution List Email
           </h2>
@@ -698,7 +698,7 @@ export function InstitutionalMailingListView({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="allstudents@apc.edu.ph"
-                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs font-mono text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+                className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs font-mono text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
               />
             </div>
 
@@ -709,7 +709,7 @@ export function InstitutionalMailingListView({
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as RecipientRole)}
-                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
+                className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] focus:border-[#24408E] outline-none"
               >
                 <option value="student">Students</option>
                 <option value="faculty">Faculty</option>
@@ -727,7 +727,7 @@ export function InstitutionalMailingListView({
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
                 placeholder="All Departments, SoCIT, SoE, SoM, SoA..."
-                className="w-full p-2.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+                className="w-full p-2.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
               />
               <datalist id="campussync-departments">
                 {DEPARTMENT_SUGGESTIONS.map((dept) => (
@@ -737,12 +737,12 @@ export function InstitutionalMailingListView({
             </div>
 
             {formError && (
-              <div className="p-2.5 rounded bg-[#FBEDEC] border border-[#E2B3AF] text-[11px] text-[#B3261E]">
+              <div className="p-2.5 rounded-none bg-[#FBEDEC] border border-[#E2B3AF] text-[11px] text-[#B3261E]">
                 {formError}
               </div>
             )}
             {formSuccess && (
-              <div className="p-2.5 rounded bg-[#E6F3EC] border border-[#B6DFC8] text-[11px] text-[#1F7A4D]">
+              <div className="p-2.5 rounded-none bg-[#E6F3EC] border border-[#B6DFC8] text-[11px] text-[#1F7A4D]">
                 {formSuccess}
               </div>
             )}
@@ -750,7 +750,7 @@ export function InstitutionalMailingListView({
             <button
               type="submit"
               disabled={saving}
-              className="w-full py-2.5 rounded-md bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full py-2.5 rounded-none bg-[#24408E] hover:bg-[#1B3270] text-white font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
               Add Distribution List
@@ -758,15 +758,15 @@ export function InstitutionalMailingListView({
           </form>
         </div>
 
-        <div className="lg:col-span-8 rounded-lg bg-white border border-[#DDE2EA] shadow-xs overflow-hidden flex flex-col">
+        <div className="lg:col-span-8 rounded-none bg-white border border-[#DDE2EA] shadow-xs overflow-hidden flex flex-col">
           <div className="p-4 border-b border-[#DDE2EA] flex flex-wrap items-center justify-between gap-3 bg-[#F7F8FA]">
-            <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-md border border-[#DDE2EA] text-[11px]">
+            <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-none border border-[#DDE2EA] text-[11px]">
               {(["all", "student", "faculty", "staff", "all_campus"] as const).map((r) => (
                 <button
                   key={r}
                   type="button"
                   onClick={() => setRoleFilter(r)}
-                  className={`px-2.5 py-1 rounded font-semibold cursor-pointer transition ${
+                  className={`px-2.5 py-1 rounded-none font-semibold cursor-pointer transition ${
                     roleFilter === r
                       ? "bg-[#24408E] text-white"
                       : "text-[#5B6678] hover:text-[#18212F]"
@@ -783,7 +783,7 @@ export function InstitutionalMailingListView({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filter email or dept..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-md bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
+                className="w-full pl-8 pr-3 py-1.5 rounded-none bg-white border border-[#C9D0DB] text-xs text-[#18212F] placeholder:text-[#6B778A] focus:border-[#24408E] outline-none"
               />
             </div>
           </div>
@@ -813,7 +813,7 @@ export function InstitutionalMailingListView({
                         {rec.email}
                       </td>
                       <td className="p-3">
-                        <span className="px-2 py-0.5 rounded bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
+                        <span className="px-2 py-0.5 rounded-none bg-[#EAEFFA] text-[#24408E] border border-[#C5D3F3] text-[10px] font-semibold">
                           {formatRoleLabel(rec.role)}
                         </span>
                       </td>
@@ -822,7 +822,7 @@ export function InstitutionalMailingListView({
                         <button
                           type="button"
                           onClick={() => void onToggleRecipient(rec)}
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer transition ${
+                          className={`px-2.5 py-0.5 rounded-none text-[10px] font-bold border cursor-pointer transition ${
                             rec.is_active
                               ? "bg-[#E6F3EC] text-[#1F7A4D] border-[#B6DFC8] hover:bg-[#D5ECDF]"
                               : "bg-[#F2F4F7] text-[#5B6678] border-[#DDE2EA] hover:bg-[#E5E9F0]"
@@ -836,7 +836,7 @@ export function InstitutionalMailingListView({
                           type="button"
                           title="Remove distribution list"
                           onClick={() => void onDeleteRecipient(rec.id)}
-                          className="p-1.5 rounded text-[#5B6678] hover:text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
+                          className="p-1.5 rounded-none text-[#5B6678] hover:text-[#B3261E] hover:bg-[#FBEDEC] cursor-pointer"
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -851,7 +851,7 @@ export function InstitutionalMailingListView({
       </div>
 
       {/* Dispatched Institutional Announcements Audit Log */}
-      <div className="rounded-lg bg-white border border-[#DDE2EA] shadow-xs overflow-hidden">
+      <div className="rounded-none bg-white border border-[#DDE2EA] shadow-xs overflow-hidden">
         <div className="px-5 py-3.5 border-b border-[#DDE2EA] bg-[#F7F8FA] flex items-center justify-between">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[#24408E] flex items-center gap-2">
             <Send className="size-3.5" /> Institutional Email Dispatch Log ({dispatches.length})
@@ -900,7 +900,7 @@ export function InstitutionalMailingListView({
                       <td className="p-3">
                         <div className="flex flex-wrap items-center gap-1">
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[10px] font-bold border ${
                               d.status === "SENT"
                                 ? isSandbox
                                   ? "bg-[#FFF4DC] text-[#8A5A00] border-[#E5C98B]"
@@ -924,7 +924,7 @@ export function InstitutionalMailingListView({
                               href={d.preview_url}
                               target="_blank"
                               rel="noreferrer"
-                              className="px-2.5 py-1 rounded bg-[#FFF4DC] hover:bg-[#FCE8BA] border border-[#E5C98B] text-[#8A5A00] text-[10px] font-semibold flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-none bg-[#FFF4DC] hover:bg-[#FCE8BA] border border-[#E5C98B] text-[#8A5A00] text-[10px] font-semibold flex items-center gap-1"
                             >
                               Ethereal <ExternalLink className="size-3" />
                             </a>
@@ -933,7 +933,7 @@ export function InstitutionalMailingListView({
                             <button
                               type="button"
                               onClick={() => onPreviewDispatch(d)}
-                              className="px-2.5 py-1 rounded bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1 rounded-none bg-[#EAEFFA] hover:bg-[#DCE6FA] border border-[#C5D3F3] text-[#24408E] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
                             >
                               <Eye className="size-3" /> Preview
                             </button>
@@ -943,7 +943,7 @@ export function InstitutionalMailingListView({
                               type="button"
                               disabled={retryingProposalId === d.proposal_id}
                               onClick={() => void onRetryDispatch(d)}
-                              className="px-2.5 py-1 rounded bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[10px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1 rounded-none bg-[#B3261E] hover:bg-[#8C1D18] text-white text-[10px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
                             >
                               {retryingProposalId === d.proposal_id ? (
                                 <Loader2 className="size-3 animate-spin" />
