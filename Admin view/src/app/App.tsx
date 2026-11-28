@@ -424,6 +424,33 @@ async function computeSha256Hex(payload: string): Promise<string> {
   return `${partA}${partB}`.repeat(4).slice(0, 64);
 }
 
+const ADMIN_ACCOUNTS_CACHE_KEY = "campussync_admin_registered_accounts_v1";
+
+interface LocalAdminAccountRecord {
+  full_name: string;
+  email: string;
+  password_hash: string;
+}
+
+function readLocalAdminAccounts(): Record<string, LocalAdminAccountRecord> {
+  try {
+    const raw = localStorage.getItem(ADMIN_ACCOUNTS_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, LocalAdminAccountRecord>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalAdminAccount(account: LocalAdminAccountRecord) {
+  try {
+    const current = readLocalAdminAccounts();
+    current[account.email.toLowerCase()] = account;
+    localStorage.setItem(ADMIN_ACCOUNTS_CACHE_KEY, JSON.stringify(current));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export default function CoordinatorView() {
   const publicSurveyToken = getPublicSurveyTokenFromLocation();
   if (publicSurveyToken) {
@@ -431,11 +458,15 @@ export default function CoordinatorView() {
   }
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
     const savedSession = localStorage.getItem("campussync_admin_logged_in");
@@ -450,9 +481,106 @@ export default function CoordinatorView() {
     }
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const completeCoordinatorSignIn = (trimmedEmail: string) => {
+    if (rememberMe) {
+      localStorage.setItem("campussync_admin_remembered_email", trimmedEmail);
+      localStorage.setItem("campussync_admin_logged_in", "true");
+    } else {
+      localStorage.removeItem("campussync_admin_remembered_email");
+      localStorage.removeItem("campussync_admin_logged_in");
+    }
+    setEmail(trimmedEmail);
+    setIsLoggedIn(true);
+    setPassword("");
+  };
+
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
+    setSuccessMessage("");
+
+    const trimmedName = fullName.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedName || !trimmedEmail || !trimmedPassword) {
+      setErrorMessage("Please complete all required registration fields.");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setErrorMessage("Please enter a valid email address.");
+      return;
+    }
+
+    if (trimmedPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters long.");
+      return;
+    }
+
+    setAuthLoading(true);
+
+    // Check if account already exists in Supabase public.users or local cache
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("user_id")
+      .eq("email", trimmedEmail)
+      .maybeSingle();
+
+    const localAccounts = readLocalAdminAccounts();
+    if (
+      existingUser ||
+      localAccounts[trimmedEmail] ||
+      trimmedEmail === VALID_ADMIN_EMAIL ||
+      trimmedEmail === "admin@apc.edu.ph"
+    ) {
+      setAuthLoading(false);
+      setErrorMessage("An account with this email already exists. Please sign in instead.");
+      return;
+    }
+
+    // Insert permanent admin coordinator record into Supabase (role_id: 2 = Admin Coordinator)
+    const { error } = await supabase.from("users").insert([
+      {
+        role_id: 2,
+        full_name: trimmedName,
+        email: trimmedEmail,
+        organization: "Asia Pacific College",
+        password_hash: trimmedPassword,
+      },
+    ]);
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      // Graceful fallback if public.roles does not yet contain role_id = 2
+      if (msg.includes("foreign key") || msg.includes("role_id")) {
+        saveLocalAdminAccount({
+          full_name: trimmedName,
+          email: trimmedEmail,
+          password_hash: trimmedPassword,
+        });
+      } else {
+        setAuthLoading(false);
+        setErrorMessage(`Registration failed: ${error.message}`);
+        return;
+      }
+    } else {
+      saveLocalAdminAccount({
+        full_name: trimmedName,
+        email: trimmedEmail,
+        password_hash: trimmedPassword,
+      });
+    }
+
+    setAuthLoading(false);
+    completeCoordinatorSignIn(trimmedEmail);
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage("");
+    setSuccessMessage("");
 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
@@ -468,26 +596,69 @@ export default function CoordinatorView() {
       return;
     }
 
-    const isValid =
-      (trimmedEmail === VALID_ADMIN_EMAIL && trimmedPassword === VALID_ADMIN_PASSWORD) ||
-      (trimmedEmail === "admin@apc.edu.ph" && trimmedPassword === "adminpassword123") ||
-      (trimmedEmail.endsWith("@apc.edu.ph") && trimmedPassword.length >= 6);
-
-    if (!isValid) {
-      setErrorMessage("Invalid credentials. Try coordinator@apc.edu.ph / adminpassword123");
+    if (trimmedPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters.");
       return;
     }
 
-    if (rememberMe) {
-      localStorage.setItem("campussync_admin_remembered_email", trimmedEmail);
-      localStorage.setItem("campussync_admin_logged_in", "true");
-    } else {
-      localStorage.removeItem("campussync_admin_remembered_email");
-      localStorage.removeItem("campussync_admin_logged_in");
+    setAuthLoading(true);
+
+    // 1. Check permanent registered accounts in Supabase public.users
+    const { data: dbUser } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", trimmedEmail)
+      .maybeSingle();
+
+    if (dbUser) {
+      if (dbUser.role_id === 1) {
+        setAuthLoading(false);
+        setErrorMessage(
+          "This email belongs to a Facilitator account. Please sign in with an Admin Coordinator account."
+        );
+        return;
+      }
+
+      if (dbUser.password_hash !== trimmedPassword) {
+        setAuthLoading(false);
+        setErrorMessage("Incorrect password for this coordinator account.");
+        return;
+      }
+
+      setAuthLoading(false);
+      completeCoordinatorSignIn(trimmedEmail);
+      return;
     }
 
-    setIsLoggedIn(true);
-    setPassword("");
+    // 2. Check locally cached registered coordinator accounts (fallback if FK on role_id=2 wasn't seeded yet)
+    const localAccount = readLocalAdminAccounts()[trimmedEmail];
+    if (localAccount) {
+      if (localAccount.password_hash !== trimmedPassword) {
+        setAuthLoading(false);
+        setErrorMessage("Incorrect password for this coordinator account.");
+        return;
+      }
+      setAuthLoading(false);
+      completeCoordinatorSignIn(trimmedEmail);
+      return;
+    }
+
+    // 3. Built-in default prototype coordinator credentials with strict password verification
+    if (trimmedEmail === VALID_ADMIN_EMAIL || trimmedEmail === "admin@apc.edu.ph") {
+      if (trimmedPassword !== VALID_ADMIN_PASSWORD) {
+        setAuthLoading(false);
+        setErrorMessage("Incorrect password for this coordinator account.");
+        return;
+      }
+      setAuthLoading(false);
+      completeCoordinatorSignIn(trimmedEmail);
+      return;
+    }
+
+    setAuthLoading(false);
+    setErrorMessage(
+      "No coordinator account found for this email. Please create an account first."
+    );
   };
 
   const handleLogout = () => {
@@ -495,6 +666,7 @@ export default function CoordinatorView() {
     setIsLoggedIn(false);
     setPassword("");
     setErrorMessage("");
+    setSuccessMessage("");
   };
 
   if (!isLoggedIn) {
@@ -534,11 +706,47 @@ export default function CoordinatorView() {
               <span className="text-white/40">v2.5 SECURE</span>
             </div>
 
+            {/* Sign In / Create Account Mode Switcher */}
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-none bg-[#080D1A] border border-white/10 mb-5 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setErrorMessage("");
+                  setSuccessMessage("");
+                }}
+                className={`py-2 rounded-none font-bold uppercase tracking-wider transition cursor-pointer ${
+                  authMode === "login"
+                    ? "bg-[#FDB813] text-black"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("signup");
+                  setErrorMessage("");
+                  setSuccessMessage("");
+                }}
+                className={`py-2 rounded-none font-bold uppercase tracking-wider transition cursor-pointer ${
+                  authMode === "signup"
+                    ? "bg-[#FDB813] text-black"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+
             <h1 className="text-2xl md:text-3xl font-bold text-white mb-1 tracking-tight">
-              Admin Login
+              {authMode === "login" ? "Admin Login" : "Admin Sign Up"}
             </h1>
             <p className="text-xs text-[#8D99AE] mb-6">
-              Review, clear, and publish campus event proposals.
+              {authMode === "login"
+                ? "Review, clear, and publish campus event proposals."
+                : "Register a permanent Admin Coordinator account on CampusSync."}
             </p>
 
             {errorMessage && (
@@ -548,10 +756,36 @@ export default function CoordinatorView() {
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            {successMessage && (
+              <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2 rounded-none">
+                <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
+            <form
+              onSubmit={authMode === "login" ? handleLogin : handleSignUp}
+              className="space-y-4"
+            >
+              {authMode === "signup" && (
+                <div>
+                  <label className="text-[10px] font-mono tracking-wider text-slate-300 uppercase block mb-1.5">
+                    FULL NAME *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="e.g., Andrei Antonio G. Villa"
+                    className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-white/15 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#FFD000] transition rounded-none"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="text-[10px] font-mono tracking-wider text-slate-300 uppercase block mb-1.5">
-                  INSTITUTIONAL EMAIL
+                  INSTITUTIONAL EMAIL *
                 </label>
                 <input
                   type="email"
@@ -565,7 +799,7 @@ export default function CoordinatorView() {
 
               <div>
                 <label className="text-[10px] font-mono tracking-wider text-slate-300 uppercase block mb-1.5">
-                  PASSWORD
+                  PASSWORD *
                 </label>
                 <div className="relative">
                   <input
@@ -596,16 +830,23 @@ export default function CoordinatorView() {
                   />
                   Remember Me
                 </label>
-                <span className="text-[#FFD000] hover:underline cursor-pointer text-xs">
-                  Forgot Password?
-                </span>
+                {authMode === "login" && (
+                  <span className="text-[#FFD000] hover:underline cursor-pointer text-xs">
+                    Forgot Password?
+                  </span>
+                )}
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3 bg-[#FDB813] hover:bg-[#e0a20f] text-black font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition shadow-lg cursor-pointer mt-4 rounded-none"
+                disabled={authLoading}
+                className="w-full py-3 bg-[#FDB813] hover:bg-[#e0a20f] text-black font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition shadow-lg cursor-pointer mt-4 rounded-none disabled:opacity-50"
               >
-                SIGN IN TO COORDINATOR PORTAL →
+                {authLoading
+                  ? "PROCESSING..."
+                  : authMode === "login"
+                  ? "SIGN IN TO COORDINATOR PORTAL →"
+                  : "REGISTER & ENTER PORTAL →"}
               </button>
             </form>
 
