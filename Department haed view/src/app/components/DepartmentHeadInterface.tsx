@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Download,
@@ -14,9 +15,11 @@ import {
   PenTool,
   Plus,
   RefreshCw,
+  ShieldAlert,
   Sparkles,
   Trash2,
   Upload,
+  Wallet,
   X,
 } from "lucide-react";
 import {
@@ -48,6 +51,9 @@ import {
   carriedAttachmentToBlobUrl,
   carriedAttachmentToFile,
   decodeProposalDescription,
+  encodeProposalDescriptionWithAttachments,
+  type CarriedDeptHeadClearance,
+  type DeptHeadClearanceStatus,
 } from "../../lib/proposalAttachments";
 
 // Point this at your published privacy notice (the sign-up form collects name and email).
@@ -82,6 +88,10 @@ export interface EventRecord {
   accepted_attendees?: number;
   estimated_budget?: number;
   has_external_guests?: boolean;
+  requires_dept_head_review?: boolean;
+  dept_head_status?: "pending" | "approved" | "revision" | "rejected" | null;
+  dept_head_feedback?: string;
+  dept_head_approved_at?: string;
   document_bucket?: string;
   document_path?: string;
   waiver_path?: string;
@@ -89,6 +99,51 @@ export interface EventRecord {
   ai_prescreen_result?: PreScreenResult;
   ai_triage_result?: TriageResult;
   ai_feedback_analysis?: SurveyDiagnosticsResult;
+}
+
+function normalizeDeptHeadStatus(value?: string | null): DeptHeadClearanceStatus | null {
+  if (!value) return null;
+  const s = value.toLowerCase().trim();
+  if (s === "approved" || s === "endorsed") return "approved";
+  if (s === "revision" || s === "needs_revision") return "revision";
+  if (s === "rejected") return "rejected";
+  if (s === "pending") return "pending";
+  return null;
+}
+
+function getDeptHeadClearanceMeta(ev: EventRecord) {
+  const decoded = decodeProposalDescription(ev.description);
+  const carried = decoded.deptHeadClearance;
+  const rawBudget =
+    ev.estimated_budget !== undefined && ev.estimated_budget !== null
+      ? Number(ev.estimated_budget)
+      : carried?.estimatedBudget !== undefined && carried?.estimatedBudget !== null
+      ? Number(carried.estimatedBudget)
+      : null;
+  const estimatedBudget = rawBudget !== null && Number.isFinite(rawBudget) ? rawBudget : null;
+  const deptHeadStatus = normalizeDeptHeadStatus(ev.dept_head_status ?? carried?.status ?? null);
+  const deptHeadFeedback = (ev.dept_head_feedback ?? carried?.feedback ?? null) || null;
+  const deptHeadApprovedAt = (ev.dept_head_approved_at ?? carried?.approvedAt ?? null) || null;
+  const requiresBudgetReview =
+    (estimatedBudget ?? 0) > 0 ||
+    ev.requires_dept_head_review === true ||
+    carried?.requiresDeptHeadReview === true;
+
+  return {
+    estimatedBudget,
+    deptHeadStatus,
+    deptHeadFeedback,
+    deptHeadApprovedAt,
+    requiresBudgetReview,
+  };
+}
+
+function formatPhpBudget(amount?: number | null): string {
+  if (amount == null || Number.isNaN(Number(amount))) return "₱0.00";
+  return `₱${Number(amount).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 type QuestionType = "rating" | "text" | "yes_no";
@@ -175,6 +230,9 @@ const SAMPLE_EVENTS: EventRecord[] = [
     status: "pending",
     proposed_attendees: 180,
     accepted_attendees: 164,
+    estimated_budget: 25000,
+    requires_dept_head_review: true,
+    dept_head_status: "pending",
     external_registration_link: "https://forms.office.com/r/campussync-cyber-symposium",
     precheck: {
       adviser_signature: true,
@@ -741,7 +799,11 @@ export function DepartmentHeadInterface({
     };
   }, []);
 
-  const pendingCount = events.filter((e) => e.status === "pending").length;
+  const pendingCount = events.filter(
+    (e) =>
+      (e.status || "pending").toLowerCase().trim() === "pending" &&
+      getDeptHeadClearanceMeta(e).deptHeadStatus !== "approved"
+  ).length;
   const nav: { label: DeptNavView; badge?: number }[] = [
     { label: "Proposal Approvals", badge: pendingCount || undefined },
     { label: "Event Surveys" },
@@ -849,6 +911,7 @@ export function DepartmentHeadInterface({
             loading={loading}
             usingSample={usingSample}
             onRefresh={fetchQueue}
+            reviewerName={displayName}
           />
         )}
         {activeView === "Event Surveys" && (
@@ -897,12 +960,14 @@ function ProposalApprovalsView({
   loading,
   usingSample,
   onRefresh,
+  reviewerName = "Department Head",
 }: {
   events: EventRecord[];
   setEvents: React.Dispatch<React.SetStateAction<EventRecord[]>>;
   loading: boolean;
   usingSample: boolean;
   onRefresh: () => Promise<void>;
+  reviewerName?: string;
 }) {
   const [tier, setTier] = useState<Tier>("ALL");
   const [statusFilter, setStatusFilter] = useState<"PENDING" | "ALL">("PENDING");
@@ -911,6 +976,7 @@ function ProposalApprovalsView({
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<null | "revision" | "reject">(null);
   const [note, setNote] = useState("");
+  const [budgetRemarks, setBudgetRemarks] = useState("");
 
   // AI Triage state
   const [triageMap, setTriageMap] = useState<Record<string, TriageResult>>(() =>
@@ -928,7 +994,12 @@ function ProposalApprovalsView({
   const [preScreenError, setPreScreenError] = useState("");
 
   const pendingOnly = useMemo(
-    () => events.filter((e) => (e.status || "pending").toLowerCase().trim() === "pending"),
+    () =>
+      events.filter(
+        (e) =>
+          (e.status || "pending").toLowerCase().trim() === "pending" &&
+          getDeptHeadClearanceMeta(e).deptHeadStatus !== "approved"
+      ),
     [events]
   );
 
@@ -957,6 +1028,7 @@ function ProposalApprovalsView({
   );
 
   const selected = queue.find((e) => e.event_id === selectedId) ?? queue[0] ?? null;
+  const selectedFinanceMeta = selected ? getDeptHeadClearanceMeta(selected) : null;
   const decodedSelected = decodeProposalDescription(selected?.description);
   const selectedCarriedFiles = decodedSelected.files;
   const link = selected?.external_registration_link || selected?.registration_link;
@@ -1165,24 +1237,105 @@ function ProposalApprovalsView({
     }
   };
 
-  const decide = async (status: "approved" | "rejected" | "needs_revision", feedback?: string) => {
+  const decide = async (decision: "approved" | "rejected" | "needs_revision", feedback?: string) => {
     if (!selected) return;
     setSaving(true);
     setError("");
     const id = selected.event_id;
     const previous = events;
+    const nowIso = new Date().toISOString();
+    const decoded = decodeProposalDescription(selected.description);
+    const currentMeta = getDeptHeadClearanceMeta(selected);
+    const trimmedRemarks = (feedback ?? budgetRemarks).trim() || null;
+
+    const currentStatus = (selected.status || "pending").toLowerCase().trim();
+    const isAlreadyAdminApproved = currentStatus === "approved" || currentStatus === "completed";
+
+    // Two-stage clearance: Department Head approval clears Stage 1 (`dept_head_status: "approved"`)
+    // while keeping `status: "pending"` so the Admin Coordinator can execute final SHA-256 sign-off.
+    const nextEventStatus: EventRecord["status"] =
+      decision === "approved"
+        ? isAlreadyAdminApproved
+          ? selected.status
+          : "pending"
+        : decision;
+
+    const nextDeptHeadStatus: DeptHeadClearanceStatus =
+      decision === "approved"
+        ? "approved"
+        : decision === "needs_revision"
+        ? "revision"
+        : "rejected";
+
+    const nextClearance: CarriedDeptHeadClearance = {
+      requiresDeptHeadReview: true,
+      status: nextDeptHeadStatus,
+      feedback: trimmedRemarks,
+      approvedAt: decision === "approved" ? nowIso : null,
+      reviewedBy: reviewerName,
+      estimatedBudget: currentMeta.estimatedBudget,
+    };
+
+    const updatedDescription = encodeProposalDescriptionWithAttachments(decoded.cleanDescription, {
+      files: decoded.files,
+      preScreen: decoded.preScreen,
+      aiStatus: decoded.aiStatus,
+      aiUpdatedAt: decoded.aiUpdatedAt,
+      publishedSurvey: decoded.publishedSurvey,
+      emailDispatch: decoded.emailDispatch,
+      deptHeadClearance: nextClearance,
+    });
 
     setEvents((prev) =>
       prev.map((e) =>
-        e.event_id === id ? { ...e, status, admin_feedback: feedback || e.admin_feedback } : e
+        e.event_id === id
+          ? {
+              ...e,
+              status: nextEventStatus,
+              description: updatedDescription,
+              requires_dept_head_review: true,
+              dept_head_status: nextDeptHeadStatus,
+              dept_head_feedback: trimmedRemarks || undefined,
+              dept_head_approved_at: decision === "approved" ? nowIso : undefined,
+              admin_feedback:
+                decision === "approved" ? e.admin_feedback : trimmedRemarks || e.admin_feedback,
+            }
+          : e
       )
     );
 
     if (!usingSample) {
-      const { error: dbError } = await supabase
+      const extendedPayload: Record<string, unknown> = {
+        status: nextEventStatus,
+        description: updatedDescription,
+        requires_dept_head_review: true,
+        dept_head_status: nextDeptHeadStatus,
+        dept_head_feedback: trimmedRemarks,
+        dept_head_approved_at: decision === "approved" ? nowIso : null,
+        updated_at: nowIso,
+        ...(decision !== "approved" ? { admin_feedback: trimmedRemarks } : {}),
+      };
+
+      let { error: dbError } = await supabase
         .from("events")
-        .update({ status, admin_feedback: feedback || null, updated_at: new Date().toISOString() })
+        .update(extendedPayload)
         .eq("event_id", id);
+
+      // Graceful fallback when optional dept_head_* columns have not been migrated yet
+      if (dbError) {
+        const fallbackPayload: Record<string, unknown> = {
+          status: nextEventStatus,
+          description: updatedDescription,
+          updated_at: nowIso,
+          ...(decision !== "approved" ? { admin_feedback: trimmedRemarks } : {}),
+        };
+        const retry = await supabase
+          .from("events")
+          .update(fallbackPayload)
+          .eq("event_id", id);
+        dbError = retry.error;
+      }
+
       if (dbError) {
         setEvents(previous);
         setError("The decision could not be saved. Please try again.");
@@ -1197,6 +1350,7 @@ function ProposalApprovalsView({
     }
     setDialog(null);
     setNote("");
+    setBudgetRemarks("");
     setSaving(false);
   };
 
@@ -1312,17 +1466,22 @@ function ProposalApprovalsView({
           {queue.map((item) => {
             const isSel = selected?.event_id === item.event_id;
             const isTriageOpen = Boolean(expandedTriageIds[item.event_id]);
+            const finMeta = getDeptHeadClearanceMeta(item);
             return (
               <li key={item.event_id} className="border-b border-[#DDE2EA]">
                 <div
                   role="button"
                   tabIndex={0}
                   aria-current={isSel}
-                  onClick={() => setSelectedId(item.event_id)}
+                  onClick={() => {
+                    setSelectedId(item.event_id);
+                    setBudgetRemarks("");
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       setSelectedId(item.event_id);
+                      setBudgetRemarks("");
                     }
                   }}
                   className={`w-full px-4 py-3 text-left cursor-pointer ${focusRing} ${
@@ -1331,7 +1490,13 @@ function ProposalApprovalsView({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-sm font-medium leading-snug">{item.title}</span>
-                    <StatusBadge status={item.status} />
+                    {item.status === "pending" && finMeta.deptHeadStatus === "approved" ? (
+                      <span className="shrink-0 rounded bg-[#E6F3EC] px-2 py-0.5 text-[11px] font-medium text-[#1F7A4D]">
+                        Awaiting Admin
+                      </span>
+                    ) : (
+                      <StatusBadge status={item.status} />
+                    )}
                   </div>
                   <p className="mt-0.5 truncate text-xs text-[#5B6678]">{item.organization}</p>
                   <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-[#5B6678]">
@@ -1352,6 +1517,31 @@ function ProposalApprovalsView({
                       <span>{leadTime(item.event_date)}</span>
                     </span>
                   </div>
+
+                  {finMeta.requiresBudgetReview && finMeta.deptHeadStatus !== "approved" && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded bg-[#FFF4DC] border border-[#E5C98B] px-2 py-1 text-[11px] font-medium text-[#8A5A00]">
+                      <span className="flex items-center gap-1">
+                        <ShieldAlert className="size-3 shrink-0" />
+                        Budget Review Required
+                      </span>
+                      {finMeta.estimatedBudget != null && finMeta.estimatedBudget > 0 && (
+                        <span className="font-mono font-semibold">
+                          {formatPhpBudget(finMeta.estimatedBudget)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {finMeta.deptHeadStatus === "approved" && (
+                    <div className="mt-2 flex items-center gap-1.5 rounded bg-[#E6F3EC] border border-[#B6DFC8] px-2 py-1 text-[11px] font-medium text-[#1F7A4D]">
+                      <CheckCircle2 className="size-3 shrink-0" />
+                      <span>
+                        {item.status === "pending"
+                          ? "Budget Approved · Forwarded to Admin"
+                          : "Budget Approved"}
+                      </span>
+                    </div>
+                  )}
 
                   {item.aiTriage && (
                     <div className="mt-2 border-t border-[#DDE2EA]/80 pt-1.5">
@@ -1456,11 +1646,17 @@ function ProposalApprovalsView({
               </section>
             )}
 
-            <dl className="grid grid-cols-1 gap-4 border-y border-[#DDE2EA] py-4 sm:grid-cols-3">
+            <dl className="grid grid-cols-1 gap-4 border-y border-[#DDE2EA] py-4 sm:grid-cols-4">
               {[
                 ["Date", formatDate(selected.event_date)],
                 ["Time", `${selected.start_time || "–"} to ${selected.end_time || "–"}`],
                 ["Venue", selected.venue || "No venue"],
+                [
+                  "Proposed Budget",
+                  selectedFinanceMeta?.estimatedBudget && selectedFinanceMeta.estimatedBudget > 0
+                    ? formatPhpBudget(selectedFinanceMeta.estimatedBudget)
+                    : "None declared",
+                ],
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-xs text-[#5B6678]">{k}</dt>
@@ -1468,6 +1664,67 @@ function ProposalApprovalsView({
                 </div>
               ))}
             </dl>
+
+            {/* Stage 1: Department Head Budget & Financial Clearance Panel */}
+            {selectedFinanceMeta && (
+              <section className="rounded-md border border-[#DDE2EA] bg-white p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[#24408E] flex items-center gap-1.5">
+                    <Wallet className="size-3.5" aria-hidden="true" />
+                    Stage 1: Department Head Budget &amp; Financial Clearance
+                  </h3>
+                  {selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                    <span className="rounded bg-[#E6F3EC] px-2 py-0.5 text-xs font-semibold text-[#1F7A4D]">
+                      Approved · Forwarded to Admin Coordinator
+                    </span>
+                  ) : selectedFinanceMeta.requiresBudgetReview ? (
+                    <span className="rounded bg-[#FFF4DC] px-2 py-0.5 text-xs font-semibold text-[#8A5A00]">
+                      Budget Audit Required
+                    </span>
+                  ) : (
+                    <span className="rounded bg-[#F2F4F7] px-2 py-0.5 text-xs font-medium text-[#5B6678]">
+                      Standard Review
+                    </span>
+                  )}
+                </div>
+
+                {selectedFinanceMeta.deptHeadStatus === "approved" ? (
+                  <div className="rounded bg-[#E6F3EC] border border-[#B6DFC8] px-3 py-2.5 text-xs text-[#1F7A4D] space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="size-3.5 shrink-0" />
+                      Budget review approved. The Admin Coordinator has been notified for final SHA-256 sign-off.
+                    </p>
+                    {selectedFinanceMeta.deptHeadFeedback && (
+                      <p className="text-[#1B5E3C]">
+                        Remarks: {selectedFinanceMeta.deptHeadFeedback}
+                      </p>
+                    )}
+                  </div>
+                ) : selected.status === "pending" ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-[#5B6678]">
+                      Approving here clears Stage 1 (Department Head financial audit) and notifies the Admin Coordinator to unlock final SHA-256 clearance.
+                    </p>
+                    <div>
+                      <label
+                        htmlFor="dept-head-budget-remarks"
+                        className="mb-1 block text-xs font-medium text-[#18212F]"
+                      >
+                        Department Head Budget Remarks (optional, visible to Admin Coordinator)
+                      </label>
+                      <input
+                        id="dept-head-budget-remarks"
+                        type="text"
+                        value={budgetRemarks}
+                        onChange={(e) => setBudgetRemarks(e.target.value)}
+                        placeholder="e.g., Budget breakdown verified against department allocation."
+                        className={input}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            )}
 
             {/* Multimodal AI Document & Visual Signature Pre-Screening */}
             <section className="space-y-3">
@@ -1831,20 +2088,33 @@ function ProposalApprovalsView({
             )}
           </div>
 
-          {selected.status === "pending" && (
-            <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[#DDE2EA] bg-white px-6 py-4">
-              {!dialog && errorLine}
-              <button type="button" disabled={saving} onClick={() => setDialog("reject")} className={btnDanger}>
-                Reject
-              </button>
-              <button type="button" disabled={saving} onClick={() => setDialog("revision")} className={btnOutline}>
-                Request revision
-              </button>
-              <button type="button" disabled={saving} onClick={() => decide("approved")} className={btnPrimary}>
-                Endorse proposal
-              </button>
-            </footer>
-          )}
+          {selected.status === "pending" &&
+            (selectedFinanceMeta?.deptHeadStatus === "approved" ? (
+              <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 border-t border-[#B6DFC8] bg-[#E6F3EC] px-6 py-3.5 text-xs text-[#1F7A4D]">
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <CheckCircle2 className="size-4 shrink-0" />
+                  Stage 1 Complete: Budget approved and forwarded to Admin Coordinator for final SHA-256 sign-off.
+                </span>
+                <span className="rounded bg-white border border-[#B6DFC8] px-2 py-0.5 font-semibold">
+                  Awaiting Admin Final Approval
+                </span>
+              </footer>
+            ) : (
+              <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[#DDE2EA] bg-white px-6 py-4">
+                {!dialog && errorLine}
+                <button type="button" disabled={saving} onClick={() => setDialog("reject")} className={btnDanger}>
+                  Reject
+                </button>
+                <button type="button" disabled={saving} onClick={() => setDialog("revision")} className={btnOutline}>
+                  Request revision
+                </button>
+                <button type="button" disabled={saving} onClick={() => decide("approved")} className={btnPrimary}>
+                  {selectedFinanceMeta?.requiresBudgetReview
+                    ? "Approve Budget & Forward to Admin"
+                    : "Endorse & Forward to Admin"}
+                </button>
+              </footer>
+            ))}
         </article>
       ) : loading && events.length === 0 ? (
         <DetailSkeleton />
