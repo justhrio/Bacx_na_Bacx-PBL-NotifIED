@@ -43,6 +43,17 @@ export interface CarriedEmailDispatchMeta {
   errorMessage: string | null;
 }
 
+export type DeptHeadClearanceStatus = "pending" | "approved" | "revision" | "rejected";
+
+export interface CarriedDeptHeadClearance {
+  requiresDeptHeadReview?: boolean;
+  status?: DeptHeadClearanceStatus | null;
+  feedback?: string | null;
+  approvedAt?: string | null;
+  reviewedBy?: string | null;
+  estimatedBudget?: number | null;
+}
+
 export interface CarriedProposalBundle {
   files: CarriedAttachmentFile[];
   preScreen?: PreScreenResult | null;
@@ -50,6 +61,7 @@ export interface CarriedProposalBundle {
   aiUpdatedAt?: string | null;
   publishedSurvey?: CarriedPublishedSurvey | null;
   emailDispatch?: CarriedEmailDispatchMeta | null;
+  deptHeadClearance?: CarriedDeptHeadClearance | null;
 }
 
 export interface DecodedProposalDescription {
@@ -60,6 +72,7 @@ export interface DecodedProposalDescription {
   aiUpdatedAt: string | null;
   publishedSurvey: CarriedPublishedSurvey | null;
   emailDispatch: CarriedEmailDispatchMeta | null;
+  deptHeadClearance: CarriedDeptHeadClearance | null;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -133,7 +146,8 @@ export function encodeProposalDescriptionWithAttachments(
     !bundle.preScreen &&
     !bundle.aiStatus &&
     !bundle.publishedSurvey &&
-    !bundle.emailDispatch
+    !bundle.emailDispatch &&
+    !bundle.deptHeadClearance
   ) {
     return trimmed;
   }
@@ -144,6 +158,7 @@ export function encodeProposalDescriptionWithAttachments(
     aiUpdatedAt: bundle.aiUpdatedAt ?? new Date().toISOString(),
     ...(bundle.publishedSurvey ? { publishedSurvey: bundle.publishedSurvey } : {}),
     ...(bundle.emailDispatch ? { emailDispatch: bundle.emailDispatch } : {}),
+    ...(bundle.deptHeadClearance ? { deptHeadClearance: bundle.deptHeadClearance } : {}),
   });
   return `${trimmed}${MARKER_START}${serialized}${MARKER_END}`;
 }
@@ -159,6 +174,7 @@ export function decodeProposalDescription(
     aiUpdatedAt: null,
     publishedSurvey: null,
     emailDispatch: null,
+    deptHeadClearance: null,
   };
   if (!rawDescription) {
     return { ...empty, cleanDescription: "" };
@@ -187,6 +203,7 @@ export function decodeProposalDescription(
       aiUpdatedAt: parsed.aiUpdatedAt ?? null,
       publishedSurvey: parsed.publishedSurvey ?? null,
       emailDispatch: parsed.emailDispatch ?? null,
+      deptHeadClearance: parsed.deptHeadClearance ?? null,
     };
   } catch {
     return {
