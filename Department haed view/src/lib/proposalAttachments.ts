@@ -17,11 +17,25 @@ export interface CarriedAttachmentFile {
   tooLargeForInline?: boolean;
 }
 
+export type DeptHeadClearanceStatus = "pending" | "approved" | "revision" | "rejected";
+
+export interface CarriedDeptHeadClearance {
+  requiresDeptHeadReview?: boolean;
+  status?: DeptHeadClearanceStatus | null;
+  feedback?: string | null;
+  approvedAt?: string | null;
+  reviewedBy?: string | null;
+  estimatedBudget?: number | null;
+}
+
 export interface CarriedProposalBundle {
   files: CarriedAttachmentFile[];
   preScreen?: PreScreenResult | null;
   aiStatus?: ProposalAiLifecycleStatus | null;
   aiUpdatedAt?: string | null;
+  publishedSurvey?: unknown;
+  emailDispatch?: unknown;
+  deptHeadClearance?: CarriedDeptHeadClearance | null;
 }
 
 export interface DecodedProposalDescription {
@@ -30,6 +44,9 @@ export interface DecodedProposalDescription {
   preScreen: PreScreenResult | null;
   aiStatus: ProposalAiLifecycleStatus | null;
   aiUpdatedAt: string | null;
+  publishedSurvey: unknown;
+  emailDispatch: unknown;
+  deptHeadClearance: CarriedDeptHeadClearance | null;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -98,7 +115,14 @@ export function encodeProposalDescriptionWithAttachments(
   bundle: CarriedProposalBundle
 ): string {
   const trimmed = cleanDescription.trim();
-  if (bundle.files.length === 0 && !bundle.preScreen && !bundle.aiStatus) {
+  if (
+    bundle.files.length === 0 &&
+    !bundle.preScreen &&
+    !bundle.aiStatus &&
+    !bundle.publishedSurvey &&
+    !bundle.emailDispatch &&
+    !bundle.deptHeadClearance
+  ) {
     return trimmed;
   }
   const serialized = JSON.stringify({
@@ -106,6 +130,9 @@ export function encodeProposalDescriptionWithAttachments(
     preScreen: bundle.preScreen ?? null,
     aiStatus: bundle.aiStatus ?? null,
     aiUpdatedAt: bundle.aiUpdatedAt ?? new Date().toISOString(),
+    ...(bundle.publishedSurvey ? { publishedSurvey: bundle.publishedSurvey } : {}),
+    ...(bundle.emailDispatch ? { emailDispatch: bundle.emailDispatch } : {}),
+    ...(bundle.deptHeadClearance ? { deptHeadClearance: bundle.deptHeadClearance } : {}),
   });
   return `${trimmed}${MARKER_START}${serialized}${MARKER_END}`;
 }
@@ -113,30 +140,28 @@ export function encodeProposalDescriptionWithAttachments(
 export function decodeProposalDescription(
   rawDescription?: string | null
 ): DecodedProposalDescription {
+  const empty: DecodedProposalDescription = {
+    cleanDescription: rawDescription || "",
+    files: [],
+    preScreen: null,
+    aiStatus: null,
+    aiUpdatedAt: null,
+    publishedSurvey: null,
+    emailDispatch: null,
+    deptHeadClearance: null,
+  };
   if (!rawDescription) {
-    return { cleanDescription: "", files: [], preScreen: null, aiStatus: null, aiUpdatedAt: null };
+    return { ...empty, cleanDescription: "" };
   }
 
   const startIdx = rawDescription.indexOf(MARKER_START);
   if (startIdx === -1) {
-    return {
-      cleanDescription: rawDescription,
-      files: [],
-      preScreen: null,
-      aiStatus: null,
-      aiUpdatedAt: null,
-    };
+    return empty;
   }
 
   const endIdx = rawDescription.indexOf(MARKER_END, startIdx + MARKER_START.length);
   if (endIdx === -1) {
-    return {
-      cleanDescription: rawDescription,
-      files: [],
-      preScreen: null,
-      aiStatus: null,
-      aiUpdatedAt: null,
-    };
+    return empty;
   }
 
   const cleanDescription = rawDescription.slice(0, startIdx).trim();
@@ -150,14 +175,14 @@ export function decodeProposalDescription(
       preScreen: parsed.preScreen ?? null,
       aiStatus: parsed.aiStatus ?? null,
       aiUpdatedAt: parsed.aiUpdatedAt ?? null,
+      publishedSurvey: parsed.publishedSurvey ?? null,
+      emailDispatch: parsed.emailDispatch ?? null,
+      deptHeadClearance: parsed.deptHeadClearance ?? null,
     };
   } catch {
     return {
+      ...empty,
       cleanDescription,
-      files: [],
-      preScreen: null,
-      aiStatus: null,
-      aiUpdatedAt: null,
     };
   }
 }
